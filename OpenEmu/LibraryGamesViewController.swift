@@ -249,8 +249,15 @@ final class LibraryGamesViewController: NSSplitViewController {
     
     @objc func updateCollectionContentsFromSidebar() {
         
-        let selectedItem = sidebarController.selectedSidebarItem
-        collectionController.representedObject = selectedItem as? GameCollectionViewItemProtocol
+        // A fresh profile or collapsed group can temporarily have no selection.
+        // The legacy collection controller requires a real collection, never nil.
+        if sidebarController.selectedSidebarItem == nil,
+           let fallback = sidebarController.collections.first(where: { $0 is GameCollectionViewItemProtocol }) {
+            sidebarController.selectItem(fallback)
+        }
+        guard let selectedItem = sidebarController.selectedSidebarItem,
+              let collection = selectedItem as? GameCollectionViewItemProtocol else { return }
+        collectionController.representedObject = collection
         
         // For empty collections of disc-based games, display an alert to compel the user to read the disc-importing guide.
         // Delay disc alert by 200 ms to allow navigating past disc-based systems with arrow keys in the sidebar without triggering the alert.

@@ -57,6 +57,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     private var hostOptionsDirty = false
     private var directoryTask: Task<Void, Never>?
     private var directoryRefreshing = false
+    private var operationError: String?
     private var artworkKey = ""
     private var statusSplit: NSSplitView?
     private var statusPaneView: NSView?
@@ -66,6 +67,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     private var savedStatusHeight: CGFloat = 150
     private var arrangingStatus = false
     private let name = NSTextField(string: "")
+    private let hostName = NSTextField(string: "")
     private let endpoint = NSTextField(string: "")
     private let route = NSPopUpButton()
     private let stunProvider = NSPopUpButton()
@@ -136,6 +138,9 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     private var activeEndpoint: URL?
     private var listedRooms: [[String: Any]] = []
     private var heartbeatTask: Task<Void, Never>?
+    private var roomEventsTask: Task<Void, Never>?
+    private var roomSocket: URLSessionWebSocketTask?
+    private var roomEventsConnected = false
     private var busy = false
     private var heartbeatInFlight = false
     private var gameConnected = false
@@ -187,6 +192,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         refreshArtwork()
         refreshJoinIdentity()
         refreshControls()
+        if room == nil && !busy && index < 3 { refreshDirectory() }
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -269,7 +275,11 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         panel.contentMinSize = NSSize(width: 840, height: 700)
         panel.center()
         name.stringValue = defaults.string(forKey: prefix + "displayName") ?? ""
-        endpoint.stringValue = defaults.string(forKey: prefix + "endpoint") ?? "https://netplay.azimuthsystems.net"
+        hostName.stringValue = name.stringValue
+        let central = Bundle.main.object(forInfoDictionaryKey: "NXCentralLobbyURL") as? String ?? "https://netplay.azimuthsystems.net"
+        let savedEndpoint = defaults.string(forKey: prefix + "endpoint")
+        endpoint.stringValue = savedEndpoint == nil || savedEndpoint == "https://netplay.azimuthsystems.net" ? central : savedEndpoint!
+        defaults.set(endpoint.stringValue, forKey: prefix + "endpoint")
         route.addItems(withTitles: ["Automatic (direct or relay)", "Direct only", "Relay only"])
         // Earlier test builds persisted Relay only. New sessions prefer direct ICE.
         if !defaults.bool(forKey: prefix + "automaticRoutingV1") {
@@ -294,7 +304,11 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         for control in [publicRoom, protectedRoom, spectators, shareROM] { control.target = self; control.action = #selector(optionsChanged) }
         for popup in [joinRole, browseRole] { popup.addItems(withTitles: ["Player", "Spectator"]); popup.setAccessibilityLabel("Join as") }
         for field in [password, joinPassword, browsePassword] { field.placeholderString = "Room password (if required)"; field.setAccessibilityLabel("Room password") }
-        name.placeholderString = "Enter Player Name Here"
+        for field in [name, hostName] {
+            field.placeholderString = "Enter Player Name Here"
+            field.setAccessibilityLabel("Player name")
+            field.delegate = self
+        }
         name.setAccessibilityLabel("Player name"); endpoint.setAccessibilityLabel("Lobby server")
         title.setAccessibilityLabel("Room name"); invite.setAccessibilityLabel("Invite code")
         title.delegate = self; password.delegate = self; name.delegate = self
@@ -380,7 +394,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         directHint.textColor = .secondaryLabelColor
         let resumeActions = NSStackView(views: [resumeGameButton, newGameButton])
         resumeActions.heightAnchor.constraint(equalToConstant: 32).isActive = true
-        let roomColumn = settingsColumn("Room", [fieldGroup("Room name", title),
+        let roomColumn = settingsColumn("Room", [fieldGroup("Player name", hostName), fieldGroup("Room name", title),
             fieldGroup("Relay Fallback", relayPicker), directHint,
             fieldGroup("Saved Multiplayer Session", resumeActions), resumeLabel])
         let downloadHint = label("Players only, with your approval. Spectators cannot download games.")
@@ -468,14 +482,13 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                 guard let self else { return }
                 guard self.panel.isVisible else { continue }
                 self.refreshArtwork()
-                if self.navigation.selectedSegment == 1 && self.room == nil && !self.busy { self.refreshDirectory() }
+                // Public catalogs refresh only on opening or explicit request.
             }
         }
     }
     func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
-        guard !busy, let identifier = tabViewItem?.identifier as? String,
-              identifier == "Join Game" || identifier == "Relays" else { return }
-        refreshDirectory()
+        // Switching tabs uses the cached catalog; explicit Refresh fetches changes.
+        refreshControls()
     }
     @objc private func selectSection() {
         tabs.selectTabViewItem(at: navigation.selectedSegment)
@@ -529,7 +542,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         exportButton.isHidden = currentAutosaveURL == nil
         exportButton.isEnabled = !busy && currentAutosaveURL.map { FileManager.default.fileExists(atPath: $0.path) } == true
         chooseButton.isEnabled = !busy && room == nil; saveButton.isEnabled = !busy && room == nil
-        endpoint.isEnabled = !busy && room == nil; name.isEnabled = !busy && room == nil
+        endpoint.isEnabled = !busy && room == nil; name.isEnabled = !busy && room == nil; hostName.isEnabled = name.isEnabled
         refreshJoinIdentity()
         let editable = !busy && (room == nil || isHost)
         for control in [publicRoom, protectedRoom, spectators, shareROM] { control.isEnabled = editable }
@@ -545,10 +558,10 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         connectPulseActive = animate; launchButton.wantsLayer = true
         launchButton.layer?.removeAnimation(forKey: "connectReady")
         if animate {
-            launchButton.layer?.cornerRadius = 9
-            let pulse = CABasicAnimation(keyPath: "backgroundColor")
-            pulse.fromValue = NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor
-            pulse.toValue = NSColor.controlAccentColor.withAlphaComponent(0.8).cgColor
+            // Animate the native glass rendering, never a rectangular backing fill.
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 0.72
+            pulse.toValue = 1.0
             pulse.duration = 1.2
             pulse.autoreverses = true; pulse.repeatCount = .infinity
             launchButton.layer?.add(pulse, forKey: "connectReady")
@@ -788,7 +801,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     }
     private func displayName() throws -> String {
         let value = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, value.count <= 32 else { throw fail("Enter a player name of 1–32 characters on Join Game.") }; return value
+        guard !value.isEmpty, value.count <= 32 else { throw fail("Enter a player name of 1–32 characters before creating or joining a room.") }; return value
     }
     private func authorizeRelay(_ base: URL, roomID: String) async throws -> [String: Any] {
         let result = try await api(base, "POST", "v1/rooms/" + roomID + "/relay-access", [:], token: memberToken)
@@ -831,10 +844,22 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         return object
     }
     private func perform(_ operation: @escaping @MainActor () async throws -> Void) {
-        guard !busy else { return }; busy = true; status.stringValue = "Contacting lobby…"; refreshControls()
+        guard !busy else { return }
+        // Commit the field editor before disabling controls; otherwise AppKit can
+        // discard the room name/password still being edited when a button fires.
+        guard panel.makeFirstResponder(nil) else { return }
+        busy = true; operationError = nil; status.stringValue = "Contacting lobby…"; refreshControls()
         Task { @MainActor in
             defer { self.busy = false; self.refreshControls() }
-            do { try await operation() } catch { self.status.stringValue = error.localizedDescription }
+            do { try await operation() } catch {
+                self.operationError = error.localizedDescription
+                self.status.stringValue = error.localizedDescription
+                let alert = NSAlert()
+                alert.messageText = "Network Play could not complete the request"
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: "OK")
+                await alert.beginSheetModal(for: self.panel)
+            }
         }
     }
     @objc static func hostLibraryGame(_ game: OEDBGame) {
@@ -1039,12 +1064,16 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         guard room == nil, gameProcess == nil else { return }
         perform {
             let base = try self.baseURL(); let username = try self.displayName()
-            var body = try self.hostOptions(newRoom: true); self.password.stringValue = ""
+            var body = try self.hostOptions(newRoom: true)
+            if self.relays.indices.contains(self.relayPicker.indexOfSelectedItem) {
+                body["relay_id"] = self.relays[self.relayPicker.indexOfSelectedItem]["id"]
+            }
             body["username"] = username; let compatibility = try await self.identity(); body["compatibility"] = compatibility
             self.verifiedSHA = compatibility["rom_sha256"] as? String
             self.romMatch.stringValue = "✓ Host game verified. Players must match its SHA-256."
             let response = try await self.api(base, "POST", "v1/rooms", body)
             try self.admit(response, tokenKey: "owner_token", base: base)
+            self.password.stringValue = ""
         }
     }
     private static func displayInvite(_ value: String) -> String {
@@ -1055,7 +1084,12 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSTextField else { return }
         if field === title || field === password { optionsChanged(); return }
-        if field === name { defaults.set(name.stringValue, forKey: prefix + "displayName"); refreshJoinIdentity(); refreshControls(); return }
+        if field === name || field === hostName {
+            let value = field.stringValue
+            name.stringValue = value; hostName.stringValue = value
+            defaults.set(value, forKey: prefix + "displayName")
+            refreshJoinIdentity(); refreshControls(); return
+        }
         guard field === invite else { return }
         let formatted = Self.displayInvite(field.stringValue)
         if field.stringValue != formatted { field.stringValue = formatted }
@@ -1200,14 +1234,65 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     private func admit(_ response: [String: Any], tokenKey: String, base: URL) throws {
         guard let room = response["room"] as? [String: Any], let token = response[tokenKey] as? String, room["id"] is String else { throw fail("The lobby returned an incomplete room.") }
         hostOptionsDirty = false; gameMessage = nil; self.room = room; memberToken = token; activeEndpoint = base; renderRoom()
+        startRoomEvents(response["events_url"] as? String)
         heartbeatTask?.cancel()
         heartbeatTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
+                do { try await Task.sleep(nanoseconds: self?.roomEventsConnected == true ? 20_000_000_000 : 3_000_000_000) } catch { return }
                 guard let self, self.room != nil else { return }
+                self.roomSocket?.sendPing { _ in }
                 if !self.busy { await self.heartbeat() }
             }
         }
+    }
+    private func startRoomEvents(_ address: String?) {
+        stopRoomEvents()
+        // Never send membership credentials to a URL supplied by an arbitrary lobby.
+        guard let address, address == Bundle.main.object(forInfoDictionaryKey: "NXRoomEventsURL") as? String,
+              let url = URL(string: address), url.scheme == "wss",
+              let id = room?["id"] as? String else { return }
+        let token = memberToken
+        roomEventsTask = Task { @MainActor [weak self] in
+            var backoff: UInt64 = 1
+            while !Task.isCancelled {
+                guard let self, self.room?["id"] as? String == id, self.memberToken == token else { return }
+                var request = URLRequest(url: url)
+                request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+                request.setValue(id, forHTTPHeaderField: "X-NX-Room-ID")
+                let socket = self.session.webSocketTask(with: request)
+                self.roomSocket = socket; socket.maximumMessageSize = 4096; socket.resume()
+                do {
+                    // Snapshot after subscribing closes the subscribe/snapshot race.
+                    try await socket.send(.string("{\"action\":\"ping\"}"))
+                    self.roomEventsConnected = true
+                    await self.heartbeat()
+                    while !Task.isCancelled {
+                        let message = try await socket.receive()
+                        let data: Data
+                        switch message {
+                        case .string(let text): data = Data(text.utf8)
+                        case .data(let bytes): data = bytes
+                        @unknown default: continue
+                        }
+                        guard let event = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                              event["room_id"] as? String == id else { continue }
+                        backoff = 1
+                        // Fetch the authenticated view; events never contain room secrets.
+                        await self.heartbeat()
+                    }
+                } catch { /* Heartbeat polling covers reconnects and service outages. */ }
+                self.roomEventsConnected = false
+                socket.cancel(with: .goingAway, reason: nil)
+                guard !Task.isCancelled else { return }
+                do { try await Task.sleep(nanoseconds: backoff * 1_000_000_000) } catch { return }
+                backoff = min(backoff * 2, 30)
+            }
+        }
+    }
+    private func stopRoomEvents() {
+        roomEventsTask?.cancel(); roomEventsTask = nil
+        roomSocket?.cancel(with: .goingAway, reason: nil); roomSocket = nil
+        roomEventsConnected = false
     }
     private func renderRoom() {
         guard let room else { roomStatus.stringValue = ""; return }
@@ -1357,17 +1442,15 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         return cell
     }
     private func rebuildRelayPicker() {
-        let selected = endpoint.stringValue.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let selected = defaults.string(forKey: prefix + "relayID") ?? "nx-west"
         relayPicker.removeAllItems()
         for relay in relays { relayPicker.addItem(withTitle: "\(relay["name"] ?? "Relay") · \(relay["region"] ?? "")") }
-        if let index = relays.firstIndex(where: { $0["endpoint"] == selected }) { relayPicker.selectItem(at: index) }
-        else { relayPicker.addItem(withTitle: "Custom server (Settings)"); relayPicker.selectItem(at: relays.count) }
+        if let index = relays.firstIndex(where: { $0["id"] == selected }) { relayPicker.selectItem(at: index) }
         relayTable.reloadData()
     }
     @objc private func selectRelay() {
-        guard room == nil, gameProcess == nil, relays.indices.contains(relayPicker.indexOfSelectedItem), let address = relays[relayPicker.indexOfSelectedItem]["endpoint"] else { return }
-        endpoint.stringValue = address
-        defaults.set(address, forKey: prefix + "endpoint")
+        guard room == nil, relays.indices.contains(relayPicker.indexOfSelectedItem) else { return }
+        defaults.set(relays[relayPicker.indexOfSelectedItem]["id"], forKey: prefix + "relayID")
         status.stringValue = "Relay fallback selected. Automatic connections still try direct play first."
     }
     @objc private func useSelectedRelay() {
@@ -1381,33 +1464,28 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         Task { @MainActor in
             defer { self.directoryRefreshing = false; self.refreshControls() }
             self.catalogMessage = ""
-            if let directory = self.directoryURL {
-                do {
-                    let result = try await self.api(directory, "GET", "v1/relays")
-                    guard result["schema"] as? Int == 1, let items = result["relays"] as? [[String: Any]], items.count <= 100 else { throw self.fail("Invalid relay directory.") }
-                    var valid: [[String: String]] = []
-                    for item in items {
-                        guard let address = item["endpoint"] as? String, let url = URL(string: address), url.scheme == "https", url.user == nil, url.password == nil, url.query == nil, url.fragment == nil, url.path.isEmpty || url.path == "/", url.port == nil || url.port == 443,
-                              let host = url.host, host.contains("."), !Self.isLANHost(host), let name = item["name"] as? String, name.count <= 64, item["protocol"] as? Int == 1 else { continue }
-                        valid.append(["id": item["id"] as? String ?? address, "name": name, "endpoint": address, "region": String((item["region"] as? String ?? "").prefix(48)), "operator": String((item["operator"] as? String ?? "").prefix(80))])
-                    }
-                    guard !valid.isEmpty else { throw self.fail("No approved relays are available yet.") }
-                    self.relays = Array(valid.prefix(8)); self.rebuildRelayPicker()
-                } catch { self.catalogMessage = "Directory unavailable; showing the built-in or last loaded relays. " }
-            }
-            var refreshedRooms: [[String: Any]] = []; self.relayStatus = [:]
-            for relay in self.relays {
-                guard let address = relay["endpoint"], let base = URL(string: address) else { continue }
-                do {
-                    let result = try await self.api(base, "GET", "v1/rooms")
-                    guard let rooms = result["rooms"] as? [[String: Any]], rooms.count <= 64 else { throw self.fail("Invalid room list.") }
-                    self.relayStatus[address] = "Online"
-                    for var room in rooms where room["visibility"] as? String == "public" {
-                        room["relay_endpoint"] = address; room["relay_name"] = relay["name"]
-                        refreshedRooms.append(room)
-                    }
-                } catch { self.relayStatus[address] = "Unreachable" }
-
+            var refreshedRooms: [[String: Any]] = []
+            do {
+                let base = try self.baseURL()
+                let result = try await self.api(base, "GET", "v1/relays")
+                guard result["schema"] as? Int == 2, let items = result["relays"] as? [[String: Any]], items.count <= 100 else { throw self.fail("Invalid relay directory.") }
+                self.relays = items.compactMap { item in
+                    guard let id = item["id"] as? String, let name = item["name"] as? String,
+                          let region = item["region"] as? String, let operatorName = item["operator"] as? String else { return nil }
+                    return ["id": id, "name": name, "region": region, "operator": operatorName, "endpoint": base.absoluteString]
+                }
+                self.rebuildRelayPicker()
+                let listing = try await self.api(base, "GET", "v1/rooms")
+                guard let rooms = listing["rooms"] as? [[String: Any]], rooms.count <= 1024 else { throw self.fail("Invalid room list.") }
+                for var room in rooms where room["visibility"] as? String == "public" {
+                    room["relay_endpoint"] = base.absoluteString
+                    refreshedRooms.append(room)
+                }
+                self.relayStatus = [base.absoluteString: "Registered"]
+            } catch {
+                self.catalogMessage = "Catalog refresh failed: " + error.localizedDescription
+                if self.room == nil && !self.busy && self.operationError == nil { self.status.stringValue = self.catalogMessage }
+                return
             }
             let selected = self.listedRooms.indices.contains(self.roomList.selectedRow) ? self.listedRooms[self.roomList.selectedRow] : nil
             self.listedRooms = refreshedRooms
@@ -1415,8 +1493,8 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             if let selected, let index = refreshedRooms.firstIndex(where: { $0["id"] as? String == selected["id"] as? String && $0["relay_endpoint"] as? String == selected["relay_endpoint"] as? String }) {
                 self.roomList.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
             }
-            let offline = self.relayStatus.values.filter { $0 != "Online" }.count
-            if self.room == nil && !self.busy { self.status.stringValue = self.catalogMessage + "\(self.listedRooms.count) public game(s) across \(self.relays.count) relay(s)." + (offline > 0 ? " \(offline) relay(s) could not be reached." : "") + " Games update automatically every five seconds." }
+            let offline = self.relayStatus.values.filter { $0 == "Unreachable" }.count
+            if self.room == nil && !self.busy && self.operationError == nil && self.navigation.selectedSegment == 1 { self.status.stringValue = self.catalogMessage + "\(self.listedRooms.count) public game(s) across \(self.relays.count) relay(s)." + (offline > 0 ? " \(offline) relay(s) could not be reached." : "") + " Choose Refresh Games to update the list." }
         }
     }
     @objc private func updateHost() {
@@ -1436,7 +1514,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         guard !busy, let base = activeEndpoint, let id = room?["id"] as? String else { return }
         let token = memberToken
         let suffix = room?["role"] as? String == "host" ? "" : "/membership"
-        heartbeatTask?.cancel(); heartbeatTask = nil
+        heartbeatTask?.cancel(); heartbeatTask = nil; stopRoomEvents()
         perform {
             if let process = self.gameProcess {
                 self.gameStopping = true; self.cancelProgress()
@@ -1465,7 +1543,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         // If the lobby disappears, still wait for graceful helper termination
         // before enabling another connection. Its handler clears gameProcess.
         if let process = gameProcess { gameStopping = true; process.terminate() }
-        heartbeatTask?.cancel(); heartbeatTask = nil
+        heartbeatTask?.cancel(); heartbeatTask = nil; stopRoomEvents()
         liveRoute = "connecting"; liveRTT = -1
         room = nil; memberToken = ""; activeEndpoint = nil
         verifiedSHA = nil; romMatch.stringValue = ""

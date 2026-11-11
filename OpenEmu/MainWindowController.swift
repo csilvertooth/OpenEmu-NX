@@ -470,19 +470,16 @@ extension MainWindowController: NSWindowDelegate {
             let alert = NSAlert()
             alert.messageText = "What’s New in OpenEmu-NX \(version)"
             let content = NSTextField(wrappingLabelWithString: """
-            A clearer Network Play window
-            Host and Join have stable layouts, separate game status, and prominent actions. Join by invite code or public listing, with direct connections preferred and relay fallback when needed.
+            OpenEmu-NX Beta
+            A simpler D-pad icon, clearer player names on Host and Join, and native buttons that pulse without a rectangular background.
 
-            Share before you start
-            Players can request a matching ROM before gameplay, with host approval, progress, hash verification, and normal library import. Spectators cannot download games.
+            One lobby, direct play first
+            Rooms, invite codes and relay registration now use a central service. Refresh the public game and relay lists when you want; joined rooms receive live updates. Gameplay uses a direct connection where possible, with TURN relay fallback.
 
-            Organize your library
-            Collapse sidebar sections, favorite consoles, group by vendor or custom groups, and reorder items. Nintendo systems are grouped correctly.
+            Play together
+            Host-approved ROM transfers happen before gameplay with progress and hash verification. Multiplayer sessions save on the host for later resume.
 
-            Small details that help
-            Centered navigation, clearer player and room name hints, and refreshed artwork after game imports.
-
-            SNES netplay remains experimental. Untested games and ROM hacks are identified in the interface; other emulator systems are not yet supported by the netplay runtime. ROMs and BIOS files are not included.
+            SNES netplay remains experimental. Untested games and ROM hacks are marked; other emulator systems are available for local play. ROMs and BIOS files are not included.
             """)
             content.font = .systemFont(ofSize: 13)
             content.preferredMaxLayoutWidth = 620

@@ -19,7 +19,7 @@
       "app_version": "0.1.6-test.1",
       "status": "experimental",
       "notes": "Automated direct and relay synchronization passed; hands-on and save/resume validation pending.",
-      "evidence": "2026-11-11: Mac A and Mac B, 1800 scripted-input frames per route, matching state hashes, approximately 60 fps, no pacing resets."
+      "evidence": "2026-11-11: two Apple Silicon Macs, 1800 scripted-input frames per route, matching state hashes, approximately 60 fps, no pacing resets."
     },
     {
       "title": "ALttP randomizer eM43XdkRGj",
@@ -29,7 +29,7 @@
       "app_version": "0.1.6-test.1",
       "status": "experimental",
       "notes": "Automated direct and relay synchronization passed; hands-on and save/resume validation pending.",
-      "evidence": "2026-11-11: Mac A and Mac B, 1800 scripted-input frames per route, matching state hashes, approximately 60 fps. Randomizer relay guest recorded one pacing reset."
+      "evidence": "2026-11-11: two Apple Silicon Macs, 1800 scripted-input frames per route, matching state hashes, approximately 60 fps. Randomizer relay guest recorded one pacing reset."
     }
   ]
 }

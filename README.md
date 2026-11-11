@@ -1,20 +1,21 @@
 ![OpenEmu-NX — Classic games. Together.](docs/assets/openemu-nx-banner.svg?v=swirl-1)
 
 <p align="center">
-  <a href="https://github.com/csilvertooth/OpenEmu-NX/releases"><img alt="Testing release" src="https://img.shields.io/github/v/release/csilvertooth/OpenEmu-NX?include_prereleases&amp;style=flat-square&amp;color=9567ed" /></a>
+  <a href="https://github.com/csilvertooth/OpenEmu-NX/releases"><img alt="Beta release" src="https://img.shields.io/github/v/release/csilvertooth/OpenEmu-NX?include_prereleases&amp;style=flat-square&amp;color=9567ed" /></a>
   <img alt="Apple Silicon · macOS 14+ for netplay" src="https://img.shields.io/badge/netplay-Apple%20Silicon%20%C2%B7%20macOS%2014%2B-36aadd?style=flat-square" />
   <a href="docs/THIRD_PARTY.md"><img alt="Built on open-source projects" src="https://img.shields.io/badge/built%20on-open%20source-64748b?style=flat-square" /></a>
 </p>
 
 OpenEmu-NX is a Mac-first "netplay" like fork of [OpenEmu-Silicon](https://github.com/OpenEmu-Silicon/OpenEmu-Silicon), built on [OpenEmu](https://github.com/OpenEmu/OpenEmu). It keeps the imported game library and native Mac interface while adding shared play.
 
-This is an early testing release. Network Play currently supports **two-player Super Mario Kart NTSC v1.0**, with matching game files verified by SHA-256. Hosts can optionally share the ROM with an admitted player who confirms ownership; spectators cannot download. Local emulation retains the upstream core architecture; Network Play uses a separate portable Snes9x runtime. Broader core support does not imply netplay support for those systems.
+This is a beta release. Network Play supports experimental **two-player SNES games and ROM hacks**, with matching game files verified by SHA-256. Hosts can optionally share the ROM with an admitted player who confirms ownership; spectators cannot download. Local emulation retains the upstream core architecture; Network Play uses a separate portable Snes9x runtime. Broader core support does not imply netplay support for those systems.
 
 ## Network Play
 
 - Host public games or private rooms with readable invite codes.
 - Match the host’s game against your imported library by SHA-256 before joining.
-- Find public games across approved relays.
+- Manually refresh public games and approved relays from the central lobby.
+- Receive live room updates once joined; gameplay stays on the direct connection or TURN relay.
 - Optional room passwords and spectator viewing.
 - Rollback simulation with state-hash diagnostics.
 - Direct-first invite connections with authenticated TURN fallback through Valve GameNetworkingSockets.

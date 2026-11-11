@@ -1,3 +1,14 @@
+## 0.1.7-beta.1
+
+- Central Lambda lobby for rooms, invites and approved relay registration; relay servers carry TURN traffic.
+- Games and relay lists refresh on demand. Joined rooms receive live updates.
+- Player name is editable on both Host and Join, with clear missing-name errors.
+- Button pulse no longer paints a rectangular background behind the native button.
+- Simpler D-pad and two-button app icon; updated beta welcome notes.
+- Prevent startup failure when the legacy library view has no sidebar selection.
+
+Both players should update for the central lobby. Network play remains experimental outside validated game/core combinations. ROMs and BIOS files are not included.
+
 # 0.1.6 testing
 
 - Redesigned Network Play with Host, Join, Relays and Settings tabs, centered navigation, fixed player fields, a scrollable host list and compact game status.

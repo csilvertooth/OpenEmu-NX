@@ -338,12 +338,13 @@ This setup will install the system cores you need to start playing. Cores are mo
                                     <rect key="frame" x="17" y="156" width="383" height="56"/>
                                     <textFieldCell key="cell" controlSize="small" sendsActionOnEndEditing="YES" state="on" id="402">
                                         <font key="font" metaFont="smallSystem"/>
-                                        <string key="title">Classic games. Together. — 0.1.6
+                                        <string key="title">Classic games. Together. — 0.1.7 Beta
 
-• Clearer Host and Join layouts and game status.
-• Host-approved player downloads before gameplay.
-• Favorites, vendor groups and collapsible sidebar sections.
-• Player and room name hints and artwork fixes.
+• Central lobby with invite codes and community relay registration.
+• Manual game-list refresh and live updates inside rooms.
+• Direct play first, with relay fallback.
+• Player name on Host and Join; refined native buttons.
+• A simpler D-pad app icon.
 
 SNES netplay is experimental; untested games are marked.
 ROMs and BIOS files are not included.</string>
