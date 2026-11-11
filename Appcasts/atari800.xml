@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+  xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Atari800</title>
+                        <item>
+      <title>Atari800 3.1.5</title>
+      <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.6.0/Atari800.oecoreplugin.zip"
+        sparkle:version="3.1.5"
+        sparkle:shortVersionString="3.1.5"
+        length="166169"
+        sparkle:edSignature="gvZd+TyDL5UQFV64PM5pimYqnPzcP33JIUtyZubuJ0yZ9N0SYkpIiha1i3sa9vZXsnN6UmZFk/uo2x/deebtDw=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Atari800 3.1.4</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.8/Atari800.oecoreplugin.zip"
+        sparkle:version="3.1.4"
+        sparkle:shortVersionString="3.1.4"
+        length="168828"
+        sparkle:edSignature="BwTBJim32h4bF7yj9kiFtzSLpEYzfZ2j8nmClP8cB07r2YR58RieTmSzA3UKyER7XkDjO2MxJmMfcUWbKiMuAg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Atari800 3.1.3</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.8/Atari800.oecoreplugin.zip"
+        sparkle:version="3.1.3"
+        sparkle:shortVersionString="3.1.3"
+        length="164431"
+        sparkle:edSignature="y0hcyw/rbNgGfWCGOTmfku9NIZZcDVodjC0cLu4xhxNIgJEJ8iHNKlfDw/WKHplG4tn1HI1DFfDYQ8lvjA/+DQ=="
+        type="application/octet-stream" />
+    </item>
+
+<item>
+      <title>Atari800 3.1.2</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.1/Atari800.oecoreplugin.zip"
+        sparkle:version="3.1.2"
+        sparkle:shortVersionString="3.1.2"
+        length="175959"
+        sparkle:edSignature="E6ounP7clq/O7C3Bpioza8a5WgSm6VNv09+OrLP3qH9dpuiO6tRyrY8Ys1NXC+yuiDjRYU6wmZqf+XTpd/SOAQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Atari800 3.1.1</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.0.0/Atari800.oecoreplugin.zip"
+        sparkle:version="3.1.1"
+        sparkle:shortVersionString="3.1.1"
+        length="175957"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

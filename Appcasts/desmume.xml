@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+  xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>DeSmuME</title>
+            <item>
+      <title>DeSmuME 0.9.14.2</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.5.0/DeSmuME.oecoreplugin.zip"
+        sparkle:version="0.9.14.2"
+        sparkle:shortVersionString="0.9.14.2"
+        length="1836204"
+        sparkle:edSignature="wvd/GcHusN5Eg47EBRpJ6KDtrI8BHSGHeiO7ovSLsGTBwYJLdCmTIVMmZYRWaHxWR2chEfRDSIKovDG8UWGbCQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>DeSmuME 0.9.14.1</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.4.0/DeSmuME.oecoreplugin.zip"
+        sparkle:version="0.9.14.1"
+        sparkle:shortVersionString="0.9.14.1"
+        length="1658711"
+        sparkle:edSignature="LyBCcX652lMMU4lLrJfEfrpIoxosj4vzkykaKNF/rlVBMXL8V8+KSIJc7vxYyMyn495nvUWLfA8t7bvsJ9P9BQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>DeSmuME 0.9.14</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.3/DeSmuME.oecoreplugin.zip"
+        sparkle:version="0.9.14"
+        sparkle:shortVersionString="0.9.14"
+        length="5267152"
+        sparkle:edSignature="N02Xn0G/fIgA3yzKnw9lkiAV/B2HoXx79b3nkgVjy0wL362ckb0LVHUS/g6+JAUG2/m3YWqx6IhPUxa/SrkuCQ=="
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

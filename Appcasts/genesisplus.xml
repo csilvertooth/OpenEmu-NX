@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+  xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>GenesisPlus</title>
+                                        <item>
+      <title>GenesisPlus 1.7.5.9</title>
+      <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.6.0/GenesisPlus.oecoreplugin.zip"
+        sparkle:version="1.7.5.9"
+        sparkle:shortVersionString="1.7.5.9"
+        length="651576"
+        sparkle:edSignature="ljTg8BqPL7vK6Edq9nNI57JL+dnepDJSCRpnkrj6QczLCtT3LZz2fRkZgnOpQ7kiAHsCxzAxcaeeEsgiOO4iDQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>GenesisPlus 1.7.5.8</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.5.0/GenesisPlus.oecoreplugin.zip"
+        sparkle:version="1.7.5.8"
+        sparkle:shortVersionString="1.7.5.8"
+        length="649179"
+        sparkle:edSignature="B6rXXNp+duBGXtbsa+MpoNwssKUwLh/O+jUBz0zoRBI4EkBNhc1wIxuG2/hgAyGlFWhuoaqmFoAuO9uAqx7zCg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>GenesisPlus 1.7.5.7</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.4.0/GenesisPlus.oecoreplugin.zip"
+        sparkle:version="1.7.5.7"
+        sparkle:shortVersionString="1.7.5.7"
+        length="644962"
+        sparkle:edSignature="AL+87hN633XkVMmjrhQQXpEXHEJWUgEypoWa2Fk+OZynvnKvwsAibboQ5pIWewU+JXd0+8/L87GBo219bpoRCQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>GenesisPlus 1.7.5.6</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.6/GenesisPlus.oecoreplugin.zip"
+        sparkle:version="1.7.5.6"
+        sparkle:shortVersionString="1.7.5.6"
+        length="644450"
+        sparkle:edSignature="zTs93rSXZ2Bw5FUOuci43VLJXEwsF0o9jqJu6HJBZPLyIFOXlPiUnFu0Nq7Lm2+7kSCmEt99FJCfF8GO3qCcAQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>GenesisPlus 1.7.5.5</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.5/GenesisPlus.oecoreplugin.zip"
+        sparkle:version="1.7.5.5"
+        sparkle:shortVersionString="1.7.5.5"
+        length="643568"
+        sparkle:edSignature="6PbfJTcMUBCcJTEHqEMM1ix5R49sZ3Bjs9Gb4WiyOF/ySDgBAG/7KvemhUmXm0FLI/nN2BF3bijp9NAPCkkeCQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Genesis Plus GX 1.7.5.4</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.4/GenesisPlus.oecoreplugin.zip"
+        sparkle:version="1.7.5.4"
+        sparkle:shortVersionString="1.7.5.4"
+        length="643072"
+        sparkle:edSignature="xgoFgn02j8OSiFz/SeK/GcJsc53dIJWj7BRwr7ViZ5Cf+4FQqpfI6t7+/IDYvvNlp6Lv3squ9MDJHrvDoHVKBg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Genesis Plus GX 1.7.5.3</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.3/GenesisPlus.oecoreplugin.zip"
+        sparkle:version="1.7.5.3"
+        sparkle:shortVersionString="1.7.5.3"
+        length="1417267"
+        sparkle:edSignature="Ve/99eL/6nvGe6UlNYjrOMX7CA0LcvwgTlMPheLX3oihRlcLCRuTvEn9H5SuhoFMpLN1Aj15LHeH7n+4T1p0Bg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Genesis Plus GX 1.7.5.2</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.1/GenesisPlus.oecoreplugin.zip"
+        sparkle:version="1.7.5.2"
+        sparkle:shortVersionString="1.7.5.2"
+        length="641685"
+        sparkle:edSignature="KQCOukJo7mdFuCEsltqkMhPguJAbU1gZ+0T7Ax0TOPmYGV1uPTpanDChmEoG3FGyoQlI18abmhOl/6iBFLbFBA=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>GenesisPlus 1.7.5.1</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.0.0/GenesisPlus.oecoreplugin.zip"
+        sparkle:version="1.7.5.1"
+        sparkle:shortVersionString="1.7.5.1"
+        length="492069"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

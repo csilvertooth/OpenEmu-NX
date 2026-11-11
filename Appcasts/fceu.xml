@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+  xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>FCEU</title>
+                        <item>
+      <title>FCEU 2.6.12</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.5.0/FCEU.oecoreplugin.zip"
+        sparkle:version="2.6.12"
+        sparkle:shortVersionString="2.6.12"
+        length="561502"
+        sparkle:edSignature="PHuz3K42JT/HBPLrLrIQGA1BY3M60eCnZSY+fVoWYoJ+Q7BUfiOhOrTplSEXhOWI391MCSa2CHw/kDL6s6T7Aw=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>FCEU 2.6.11</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.6/FCEU.oecoreplugin.zip"
+        sparkle:version="2.6.11"
+        sparkle:shortVersionString="2.6.11"
+        length="555584"
+        sparkle:edSignature="syVz0tcVCCS2Lr7EhTcL0vJMoM4Ov/8ZLVpLN6FUTRN0fiCzcDN2V3LvPZVczMd+aWuwt7Fxn5vhQNJ4r9Y0Dg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>FCEU 2.6.10</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.3/FCEU.oecoreplugin.zip"
+        sparkle:version="2.6.10"
+        sparkle:shortVersionString="2.6.10"
+        length="1129534"
+        sparkle:edSignature="Gto667nOfR4v8IvBr+VBfQV+GZ43BSYt3yKAFREe26+UJHb2Hl8oNHLJfABuWJREBGfHkbVGhJb2lYgXUI/OCg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>FCEU 2.6.9</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.1/FCEU.oecoreplugin.zip"
+        sparkle:version="2.6.9"
+        sparkle:shortVersionString="2.6.9"
+        length="549247"
+        sparkle:edSignature="NDL4WOuCP1Napi9y5FLez4TClbBwIKtAj1XYv/hkps1PtVoWQlQP7g0yScwA6uGz7/16emSpq5YDIokvTFjLAA=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>FCEU 2.6.8</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.0/FCEU.oecoreplugin.zip"
+        sparkle:version="2.6.8"
+        sparkle:shortVersionString="2.6.8"
+        length="549247"
+        type="application/octet-stream" />
+    </item>
+        <item>
+      <title>FCEU 2.6.7</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.2.0/FCEU.oecoreplugin.zip"
+        sparkle:version="2.6.7"
+        sparkle:shortVersionString="2.6.7"
+        length="549269"
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>FCEU 2.6.6</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.0.0/FCEU.oecoreplugin.zip"
+        sparkle:version="2.6.6"
+        sparkle:shortVersionString="2.6.6"
+        length="396312"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

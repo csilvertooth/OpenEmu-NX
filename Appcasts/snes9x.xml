@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+  xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>SNES9x</title>
+                                <item>
+      <title>SNES9x 1.63.6</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.5.0/SNES9x.oecoreplugin.zip"
+        sparkle:version="1.63.6"
+        sparkle:shortVersionString="1.63.6"
+        length="869680"
+        sparkle:edSignature="Ro61c92faGS9ZyVGxs14XHA8lKxMesJEC7SreoMoOdSS3uExtzDiZkYis/Nexojs2/HrSWB0/5WRsoexD7HbDQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>SNES9x 1.63.5</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.6/SNES9x.oecoreplugin.zip"
+        sparkle:version="1.63.5"
+        sparkle:shortVersionString="1.63.5"
+        length="864763"
+        sparkle:edSignature="vkUMPJx8NJ8WFGB7FPTJKBgGf5MSJV3iDip8D7nfnBBvAVE833kp84K9jEy8CM/TMphLURWMfp4QiRJh4nQrBA=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>SNES9x 1.63.4</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.5/SNES9x.oecoreplugin.zip"
+        sparkle:version="1.63.4"
+        sparkle:shortVersionString="1.63.4"
+        length="864360"
+        sparkle:edSignature="WalyzWlS3TF4B7Ie6QJxxsljjQL68Vav363rdzYNT1C0H9Tw/thcCoZ/6qdTWxBl62VES6CcLr7YvBG5wdshAg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>SNES9x 1.63.3</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.3/SNES9x.oecoreplugin.zip"
+        sparkle:version="1.63.3"
+        sparkle:shortVersionString="1.63.3"
+        length="1937929"
+        sparkle:edSignature="fN1Jk0AC2VyMfOhQAZgdiUc0oa/spacTda1yEyXf6scpCyBCOETO5hOdSVYBa2BSSjjErLDmCI9DdNMnrhhaCA=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>SNES9x 1.63.2</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.2/SNES9x.oecoreplugin.zip"
+        sparkle:version="1.63.2"
+        sparkle:shortVersionString="1.63.2"
+        length="1931866"
+        sparkle:edSignature="2xuCUBVYYfb1aYF775XSIlr/IVYm7dhnMSGqOrHTCdW0CVD1Uolzu4jIvsXLH4zJyou4cn+CZyRTl2wyDRevBQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>SNES9x 1.63.1</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.1/SNES9x.oecoreplugin.zip"
+        sparkle:version="1.63.1"
+        sparkle:shortVersionString="1.63.1"
+        length="854677"
+        sparkle:edSignature="wL29CLFhU7M7wHRkpgFvU9tFe4tcegsg2O+wuWn8VIxNIqlOMiY1URqzdAWWoqi27nlnNuMvRMSQRpR6okhFBQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>SNES9x 1.63</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.0.0/SNES9x.oecoreplugin.zip"
+        sparkle:version="1.63"
+        sparkle:shortVersionString="1.63"
+        length="692777"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+  xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Mupen64Plus</title>
+                                <item>
+      <title>Mupen64Plus 2.5.18</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.5.0/Mupen64Plus.oecoreplugin.zip"
+        sparkle:version="2.5.18"
+        sparkle:shortVersionString="2.5.18"
+        length="1221791"
+        sparkle:edSignature="f8de/HDkGaaMKrfnt+Wcw0XbItMu6hyG2QOhLTOX0D4/g5K1yfWVHCbSKLdzOP7Bn9tmTvXo0g3yBsPOip+JDw=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Mupen64Plus 2.5.17</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.6/Mupen64Plus.oecoreplugin.zip"
+        sparkle:version="2.5.17"
+        sparkle:shortVersionString="2.5.17"
+        length="1217819"
+        sparkle:edSignature="SNOpYH8h67qjDq8zkj5Nb+WbDCPQAYhr5Bi3iO6cMCntAsycgJMH/a+EcCxKTu824dbItVqsfhdLRnX5EbO+Dg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Mupen64Plus 2.5.16</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.5/Mupen64Plus.oecoreplugin.zip"
+        sparkle:version="2.5.16"
+        sparkle:shortVersionString="2.5.16"
+        length="1217386"
+        sparkle:edSignature="x6wDASYNnDsstoo+Mwmre97m1rsABpa5u8HQ0H0S+1uMr5toICIWxXTLTvMIJi1qsNCTq59uSZGYzYlEJz8TDw=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Mupen64Plus 2.5.15</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.3/Mupen64Plus.oecoreplugin.zip"
+        sparkle:version="2.5.15"
+        sparkle:shortVersionString="2.5.15"
+        length="1963206"
+        sparkle:edSignature="wJn7QM6ieVka96r8XTVrFXhKkzxr3PWpkGtqF0cWK4raC/Vwlu/hiIeXL0AuEaLfFBYB/a13Bvc0lXvJwBpsBg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Mupen64Plus 2.5.14</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.2/Mupen64Plus.oecoreplugin.zip"
+        sparkle:version="2.5.14"
+        sparkle:shortVersionString="2.5.14"
+        length="1965223"
+        sparkle:edSignature="AQOgbhGg+xX7aEJQA7d1p8Swkpf7hiSX5rSmuj+vQm9UADiAA7ccYr0dnUwMMXKGI+vxnUCBFzm56Mf2SCKODw=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Mupen64Plus 2.5.13</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.1/Mupen64Plus.oecoreplugin.zip"
+        sparkle:version="2.5.13"
+        sparkle:shortVersionString="2.5.13"
+        length="1218376"
+        sparkle:edSignature="KOaTFSkDNd3/Jz9n4GaDxaKgCIdN4fiy8m0OlQ04hKiKY+eB3Fze/AQ9S8i/gId6zmFN7K23735D/Ck97duKAQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Mupen64Plus 2.5.12</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.0/Mupen64Plus.oecoreplugin.zip"
+        sparkle:version="2.5.12"
+        sparkle:shortVersionString="2.5.12"
+        length="1218351"
+        type="application/octet-stream" />
+    </item>
+        <item>
+      <title>Mupen64Plus 2.5.11</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.2.0/Mupen64Plus.oecoreplugin.zip"
+        sparkle:version="2.5.11"
+        sparkle:shortVersionString="2.5.11"
+        length="1063540"
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Mupen64Plus 2.5.10</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.0.0/Mupen64Plus.oecoreplugin.zip"
+        sparkle:version="2.5.10"
+        sparkle:shortVersionString="2.5.10"
+        length="1083105"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

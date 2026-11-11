@@ -1,0 +1,89 @@
+// Copyright (c) 2022, OpenEmu Team
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//     * Redistributions of source code must retain the above copyright
+//       notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above copyright
+//       notice, this list of conditions and the following disclaimer in the
+//       documentation and/or other materials provided with the distribution.
+//     * Neither the name of the OpenEmu Team nor the
+//       names of its contributors may be used to endorse or promote products
+//       derived from this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY OpenEmu Team ''AS IS'' AND ANY
+// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL OpenEmu Team BE LIABLE FOR ANY
+// DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+// (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+// ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import Foundation
+import OpenEmuKit
+import OpenEmuBase
+import Sentry
+
+// Initialize Sentry in the helper process if the user opted in via the host app.
+// CFPreferencesCopyValue reads the host app's preference domain directly, which is
+// safe in this non-sandboxed helper process and avoids any IPC or file-sharing setup.
+let consentValue = CFPreferencesCopyValue(
+    "NXCrashReportingEnabled" as CFString,
+    OEApplicationPreferencesDomain() as CFString,
+    kCFPreferencesAnyUser,
+    kCFPreferencesAnyHost
+)
+// A helper telemetry endpoint must be explicitly configured for the fork too.
+if (consentValue as? Bool) == true,
+   let dsn = Bundle.main.object(forInfoDictionaryKey: "NXTelemetryDSN") as? String,
+   let telemetryURL = URL(string: dsn), telemetryURL.scheme == "https",
+   telemetryURL.host != "o4511164820815872.ingest.us.sentry.io" {
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+    let build   = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+    SentrySDK.start { options in
+        options.dsn              = dsn
+        options.releaseName      = "openemu-nx@\(version)+\(build)"
+        options.environment      = "production"
+        options.debug            = false
+        options.tracesSampleRate = 0.2
+        options.enableLogs       = true
+        options.enableMetricKit  = true
+        options.appHangTimeoutInterval = 1.0
+    }
+
+    // Tag this helper process with the active game/system/core. The host writes
+    // these into its preference domain just before launching the helper, and
+    // CFPreferencesCopyValue reads from the host domain (this helper is not
+    // sandboxed). Without this, every helper crash arrives with no emulation
+    // context — and most crashes happen in the helper, not the host.
+    let domain = OEApplicationPreferencesDomain() as CFString
+    func ctx(_ key: String) -> String? {
+        CFPreferencesCopyValue(key as CFString, domain, kCFPreferencesAnyUser, kCFPreferencesAnyHost) as? String
+    }
+    let game   = ctx("OESentryActiveGame")
+    let system = ctx("OESentryActiveSystem")
+    let core   = ctx("OESentryActiveCore")
+    if game != nil || system != nil || core != nil {
+        SentrySDK.configureScope { scope in
+            scope.setContext(value: [
+                "game":   game   ?? "Unknown",
+                "system": system ?? "Unknown",
+                "core":   core   ?? "Unknown",
+                "process": "helper",
+            ], key: "emulation")
+        }
+    } else {
+        SentrySDK.configureScope { scope in
+            scope.setContext(value: ["process": "helper"], key: "emulation")
+        }
+    }
+}
+
+if let wait = ProcessInfo.processInfo.environment["OE_HELPER_WAIT_FOR_DEBUGGER"] as? NSString, wait.boolValue {
+    XPCDebugSupport.waitForDebugger(until: .distantFuture)
+}
+
+OpenEmuXPCHelperApp.run()

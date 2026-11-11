@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+  xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Picodrive</title>
+            <item>
+      <title>Picodrive 1.93.2</title>
+      <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.6.0/Picodrive.oecoreplugin.zip"
+        sparkle:version="1.93.2"
+        sparkle:shortVersionString="1.93.2"
+        length="471599"
+        sparkle:edSignature="0yjo6npv7v+Xv+C2S1krQ++e06Prhye4xYT7Y07X6jXNppTkwyJAHPPz4gmoNo3Npb5CJ7H7LJHxb524q//tCw=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Picodrive 1.93.1</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.1/Picodrive.oecoreplugin.zip"
+        sparkle:version="1.93.1"
+        sparkle:shortVersionString="1.93.1"
+        length="304136"
+        sparkle:edSignature="SkrIriB2nnqLDKi3Jj/igiZY43fDD9PWAAcp1zNKkU+kPnQhH3uITCfI3J8L/845/HWD3KFvFpzM0enY4w8eBw=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Picodrive 1.93</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.0.0/Picodrive.oecoreplugin.zip"
+        sparkle:version="1.93"
+        sparkle:shortVersionString="1.93"
+        length="304120"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

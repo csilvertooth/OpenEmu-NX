@@ -1,0 +1,696 @@
+// Copyright (c) 2026, OpenEmu Team
+// Author: Leonardo Kasperavičius
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//     * Redistributions of source code must retain the above copyright
+//       notice, this list of conditions and the following disclaimer.
+//     * Redistributions in binary form must reproduce the above copyright
+//       notice, this list of conditions and the following disclaimer in the
+//       documentation and/or other materials provided with the distribution.
+//     * Neither the name of the OpenEmu Team nor the
+//       names of its contributors may be used to endorse or promote products
+//       derived from this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY OpenEmu Team ''AS IS'' AND ANY
+// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL OpenEmu Team BE LIABLE FOR ANY
+// DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+// (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+// ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import Foundation
+import os.log
+
+// private let log = Logger(subsystem: "org.openemu.OpenEmu", category: "CheatFeedbackService")
+
+extension Notification.Name {
+    /// Posted on the main thread once a cheat-code report has been accepted by CheatWorks, so UI
+    /// showing server ratings can refresh the affected code. The `userInfo` carries the scope keys
+    /// defined on ``CheatFeedbackService`` (`cheatWorksSubmission…Key`).
+    static let cheatWorksFeedbackDidSubmit = Notification.Name("CheatWorksFeedbackDidSubmit")
+}
+
+/// Whether a cheat code worked for the user on a specific core build.
+///
+/// `unknown` is an explicit user signal ("I don't know" / retracting a report),
+/// distinct from a `nil` status on the entry, which means no report was ever made
+/// (e.g. a note-only entry). Keeping them separate matters for the "did this cheat
+/// work?" prompt and the ranking service this feeds later.
+enum CheatFeedbackStatus: String, Codable, Sendable {
+    case works
+    case doesNotWork
+    case unknown
+}
+
+/// One entry, scoped to the core build it was made against. Carries a report
+/// (`status`), a note, or both — a note alone leaves `status` nil so it isn't
+/// mistaken for a report.
+struct CheatFeedbackEntry: Codable, Sendable {
+    /// The cheat code as reported, stored verbatim. Matching normalizes via `key(for:)`, so this
+    /// keeps the readable form (case and spacing) rather than the lowercased/space-stripped key.
+    let code: String
+    let coreIdentifier: String
+    let coreVersion: String
+    /// `nil` when the user has only left a note and never reported efficacy.
+    let status: CheatFeedbackStatus?
+    /// User-authored, freeform. `nil`/absent for existing files predating this field.
+    var notes: String?
+    /// Unmodified text as published by the provider, before normalization. Not shown to the
+    /// user; kept so a future central feedback service can key on the upstream cheat rather
+    /// than on OpenEmu's own normalized encoding, which can change between versions.
+    var rawCode: String?
+    /// The `CheatDatabaseProvider.name` this code came from (e.g. "Libretro"). `nil` for
+    /// manual/Cheat Search entries, which have no upstream provider.
+    var provider: String?
+    /// `true` once this report has been submitted to CheatWorks. Absent/`nil` means not yet synced
+    /// (also the state for every entry predating the integration), so it is sent on the next sync.
+    var cheatWorksSynced: Bool?
+    let updatedAt: Date
+}
+
+private struct CheatFeedbackFile: Codable {
+    var schemaVersion: Int
+    var md5: String
+    /// Kept alongside the folder structure so a file is self-describing if ever handled
+    /// independently of its `CheatFeedback/<systemIdentifier>/` location. Optional only so
+    /// files predating this field still decode; every write path fills it in from context.
+    var systemIdentifier: String?
+    /// Best-effort, for identifying the game if its MD5 no longer resolves (e.g. re-dumped ROM).
+    var gameName: String?
+    /// Cartridge/disc serial, a second fallback identifier alongside MD5 — same role it already
+    /// plays as a DAT lookup fallback in `LibretroCheatProvider`. Backfillable during migration
+    /// since it's already stored on the ROM in the library, independent of any game/core running.
+    var serial: String?
+    /// RetroAchievements' own per-console game hash. Unlike `serial`, this is computed inside the
+    /// core at runtime from the loaded ROM, so it can only ever be captured at write time — never
+    /// backfilled during migration, which runs before any game or core exists.
+    var raHash: String?
+    var entries: [CheatFeedbackEntry]
+}
+
+/// Tracks whether the one-time file migration (see `CheatFeedbackService.migrateIfNeeded()`)
+/// has already run, so app startup doesn't re-walk every feedback file on every launch.
+private struct CheatFeedbackMigrationConfig: Codable {
+    var schemaVersion: Int
+}
+
+/// Stores the user's "does this cheat work" reports, separate from their cheat
+/// inventory so deleting a cheat never discards the report.
+///
+/// Reports are scoped to a core build: a different core, or a new version of the
+/// same core, starts with a clean slate. Superseded entries are deliberately kept
+/// — they are the history a future central ranking service would be built from.
+final class CheatFeedbackService: @unchecked Sendable {
+
+    static let shared = CheatFeedbackService()
+
+    /// `userInfo` keys for `.cheatWorksFeedbackDidSubmit`.
+    static let cheatWorksSubmissionRawCodeKey = "rawCode"
+    static let cheatWorksSubmissionMD5Key = "md5"
+    static let cheatWorksSubmissionSystemIdentifierKey = "systemIdentifier"
+    static let cheatWorksSubmissionCoreIdentifierKey = "coreIdentifier"
+    static let cheatWorksSubmissionCoreVersionKey = "coreVersion"
+
+    /// v2 added `rawCode`/`provider` per entry and `gameName`/`systemIdentifier` per file.
+    /// See `migrateIfNeeded()` for the one-time reconciliation of files predating this.
+    private static let schemaVersion = 2
+
+    private let fileManager = FileManager.default
+
+    /// Serializes read-modify-write file cycles (main-thread user edits vs. the background
+    /// CheatWorks sync) so concurrent updates to the same file can't lose each other.
+    private let fileWriteLock = NSLock()
+
+    /// Normalizes a raw cheat code into the key used for lookups.
+    static func key(for code: String) -> String {
+        code.replacingOccurrences(of: " ", with: "").lowercased()
+    }
+
+    // MARK: - Reading
+
+    /// Reports for the given core build only, keyed by normalized code.
+    func statuses(forMD5 md5: String,
+                  systemIdentifier: String,
+                  coreIdentifier: String,
+                  coreVersion: String) -> [String: CheatFeedbackStatus] {
+        let entries = load(md5: md5, systemIdentifier: systemIdentifier)?.entries ?? []
+
+        var result: [String: CheatFeedbackStatus] = [:]
+        for entry in entries where entry.coreIdentifier == coreIdentifier && entry.coreVersion == coreVersion {
+            // Skip note-only entries (nil status) so they don't read as a report.
+            if let status = entry.status { result[Self.key(for: entry.code)] = status }
+        }
+        return result
+    }
+
+    /// Every report ever made for a code, newest first. Intended for showing the
+    /// user what they reported on earlier core versions.
+    func history(forMD5 md5: String, systemIdentifier: String, code: String) -> [CheatFeedbackEntry] {
+        let key = Self.key(for: code)
+        let entries = load(md5: md5, systemIdentifier: systemIdentifier)?.entries ?? []
+        return entries
+            .filter { Self.key(for: $0.code) == key }
+            .sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// Notes for the given core build only, keyed by normalized code. Empty notes are never stored.
+    func notes(forMD5 md5: String,
+               systemIdentifier: String,
+               coreIdentifier: String,
+               coreVersion: String) -> [String: String] {
+        let entries = load(md5: md5, systemIdentifier: systemIdentifier)?.entries ?? []
+
+        var result: [String: String] = [:]
+        for entry in entries where entry.coreIdentifier == coreIdentifier && entry.coreVersion == coreVersion {
+            if let notes = entry.notes, !notes.isEmpty {
+                result[Self.key(for: entry.code)] = notes
+            }
+        }
+        return result
+    }
+
+    // MARK: - Writing
+
+    /// Records a report, replacing any previous one for the same code and core build. Existing notes
+    /// for that code/build are carried over untouched. A new report, or a changed verdict, is also
+    /// submitted to CheatWorks right after it is saved (the save always wins; the network is
+    /// best-effort and non-blocking).
+    func setStatus(_ status: CheatFeedbackStatus,
+                   forCode code: String,
+                   md5: String,
+                   systemIdentifier: String,
+                   coreIdentifier: String,
+                   coreVersion: String,
+                   rawCode: String? = nil,
+                   provider: String? = nil,
+                   gameName: String? = nil,
+                   serial: String? = nil,
+                   raHash: String? = nil) {
+        // Captured inside the upsert (which runs under the file lock) so the submission uses exactly
+        // what was stored. Set only when the verdict is new or changed — an unchanged verdict keeps
+        // its sync state and is not resent.
+        var submission: (rawCode: String?, provider: String?)?
+        upsertEntry(forCode: code,
+                    md5: md5,
+                    systemIdentifier: systemIdentifier,
+                    coreIdentifier: coreIdentifier,
+                    coreVersion: coreVersion,
+                    gameName: gameName,
+                    serial: serial,
+                    raHash: raHash) { existing in
+            let verdictChanged = existing?.status != status
+            let storedRawCode = rawCode ?? existing?.rawCode
+            let storedProvider = provider ?? existing?.provider
+            if verdictChanged { submission = (storedRawCode, storedProvider) }
+            return CheatFeedbackEntry(code: code,
+                                      coreIdentifier: coreIdentifier,
+                                      coreVersion: coreVersion,
+                                      status: status,
+                                      notes: existing?.notes,
+                                      rawCode: storedRawCode,
+                                      provider: storedProvider,
+                                      cheatWorksSynced: verdictChanged ? nil : existing?.cheatWorksSynced,
+                                      updatedAt: Date())
+        }
+
+        if let submission {
+            submitToCheatWorks(status: status, code: code, rawCode: submission.rawCode, md5: md5,
+                               systemIdentifier: systemIdentifier, coreIdentifier: coreIdentifier,
+                               coreVersion: coreVersion, gameName: gameName, provider: submission.provider)
+        }
+    }
+
+    /// Records a personal note, replacing any previous one for the same code and core build.
+    /// A note never creates a report: an existing status is carried over, otherwise status stays nil.
+    /// `nil`/empty removes the note (and the whole entry if it had no status).
+    func setNotes(_ notes: String?,
+                  forCode code: String,
+                  md5: String,
+                  systemIdentifier: String,
+                  coreIdentifier: String,
+                  coreVersion: String,
+                  rawCode: String? = nil,
+                  provider: String? = nil,
+                  gameName: String? = nil,
+                  serial: String? = nil,
+                  raHash: String? = nil) {
+        let trimmed = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newNotes = (trimmed?.isEmpty ?? true) ? nil : trimmed
+
+        upsertEntry(forCode: code,
+                    md5: md5,
+                    systemIdentifier: systemIdentifier,
+                    coreIdentifier: coreIdentifier,
+                    coreVersion: coreVersion,
+                    gameName: gameName,
+                    serial: serial,
+                    raHash: raHash) { existing in
+            // Don't persist an empty shell that has neither a status nor a note.
+            guard existing?.status != nil || newNotes != nil else { return nil }
+            return CheatFeedbackEntry(code: code,
+                                      coreIdentifier: coreIdentifier,
+                                      coreVersion: coreVersion,
+                                      status: existing?.status,
+                                      notes: newNotes,
+                                      rawCode: rawCode ?? existing?.rawCode,
+                                      provider: provider ?? existing?.provider,
+                                      cheatWorksSynced: existing?.cheatWorksSynced,
+                                      updatedAt: Date())
+        }
+    }
+
+    /// Load-or-create the file, refresh its metadata, replace any entry for this code and core build
+    /// with the one `makeEntry` returns (or drop it if that returns `nil`), then save. Shared by
+    /// `setStatus`/`setNotes` so a new metadata field only has to be threaded through here once.
+    private func upsertEntry(forCode code: String,
+                             md5: String,
+                             systemIdentifier: String,
+                             coreIdentifier: String,
+                             coreVersion: String,
+                             gameName: String?,
+                             serial: String?,
+                             raHash: String?,
+                             makeEntry: (_ existing: CheatFeedbackEntry?) -> CheatFeedbackEntry?) {
+        fileWriteLock.lock()
+        defer { fileWriteLock.unlock() }
+
+        let key = Self.key(for: code)
+        var file = load(md5: md5, systemIdentifier: systemIdentifier)
+            ?? CheatFeedbackFile(schemaVersion: Self.schemaVersion, md5: md5, systemIdentifier: systemIdentifier, gameName: gameName, serial: serial, raHash: raHash, entries: [])
+        file.systemIdentifier = systemIdentifier
+        file.gameName = gameName ?? file.gameName
+        file.serial = serial ?? file.serial
+        file.raHash = raHash ?? file.raHash
+
+        let existing = file.entries.first {
+            Self.key(for: $0.code) == key && $0.coreIdentifier == coreIdentifier && $0.coreVersion == coreVersion
+        }
+
+        file.entries.removeAll {
+            Self.key(for: $0.code) == key && $0.coreIdentifier == coreIdentifier && $0.coreVersion == coreVersion
+        }
+
+        if let entry = makeEntry(existing) {
+            file.entries.append(entry)
+        }
+
+        save(file, md5: md5, systemIdentifier: systemIdentifier)
+    }
+
+    // MARK: - CheatWorks Sync
+
+    /// How one unit of sync work resolved, bubbled up so the run can react.
+    private enum SyncStep {
+        /// Keep going to the next entry/file.
+        case next
+        /// End the run and resume on the next launch (server unreachable, installation revoked…).
+        case stop
+        /// The server rate-limited us; pause for this many seconds — exactly as it asked — then
+        /// resume. `nil` means it gave no `Retry-After`, so there's nothing to wait on.
+        case rateLimited(retryAfter: TimeInterval?)
+    }
+
+    /// Submits every stored feedback report not yet synced to CheatWorks, marking each synced as it
+    /// goes. Idempotent: already-synced reports are skipped (no network), and reports left unsynced
+    /// by a transient failure retry on the next launch (covering reports made while offline). On a
+    /// `Retry-After` the run pauses for exactly the server-specified delay, then resumes at the same
+    /// file — never restarting from the top — so repeated rate-limits can't starve files at the end
+    /// of the queue. No client-side cap or retry limit: the server owns the pacing. Call off the main
+    /// thread.
+    func syncToCheatWorks() async {
+        guard CheatWorksConfig.isEnabled, CheatWorksConfig.isClientTokenConfigured,
+              beginCheatWorksSync()
+        else { return }
+        defer { endCheatWorksSync() }
+
+        let files = collectFeedbackFiles()
+        // log.info("CheatWorks sync: \(files.count) feedback file(s) to scan")
+        var index = 0
+        // Re-checked each pass, so switching CheatWorks off (or a Retry-After pause ending after it
+        // was switched off) stops the upload instead of finishing the queue.
+        while index < files.count, CheatWorksConfig.isEnabled {
+            let fileURL = files[index]
+            switch await syncFile(at: fileURL) {
+            case .next:
+                index += 1
+            case .stop:
+                return
+            case .rateLimited(let retryAfter):
+                // Follow the server's pacing exactly; with no value to follow, resume next launch.
+                guard let retryAfter, retryAfter > 0 else { return }
+                let nanoseconds = retryAfter >= Double(UInt64.max) / 1_000_000_000
+                    ? UInt64.max
+                    : UInt64(retryAfter * 1_000_000_000)
+                do {
+                    try await Task.sleep(nanoseconds: nanoseconds)
+                } catch {
+                    return // task cancelled (e.g. app quitting) — resume next launch
+                }
+                // Resume the SAME file (index not advanced): its already-synced entries are skipped
+                // and the rate-limited one is retried, so the queue keeps moving forward.
+            }
+        }
+        // log.info("CheatWorks sync finished")
+    }
+
+    /// Only one backlog sync may run at a time (launch sync, or the one started by turning CheatWorks
+    /// back on); a second would upload the same entries twice.
+    private let cheatWorksSyncLock = NSLock()
+    private var cheatWorksSyncInProgress = false
+
+    private func beginCheatWorksSync() -> Bool {
+        cheatWorksSyncLock.lock()
+        defer { cheatWorksSyncLock.unlock() }
+        if cheatWorksSyncInProgress { return false }
+        cheatWorksSyncInProgress = true
+        return true
+    }
+
+    private func endCheatWorksSync() {
+        cheatWorksSyncLock.lock()
+        cheatWorksSyncInProgress = false
+        cheatWorksSyncLock.unlock()
+    }
+
+    /// The feedback files to sync, in order. Snapshotted once so a `Retry-After` pause can resume by
+    /// index instead of re-walking the whole store.
+    private func collectFeedbackFiles() -> [URL] {
+        guard let root = feedbackRootURL(),
+              let systemDirs = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])
+        else { return [] }
+
+        var result: [URL] = []
+        for systemDir in systemDirs {
+            guard (try? systemDir.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true,
+                  let files = try? fileManager.contentsOfDirectory(at: systemDir, includingPropertiesForKeys: nil)
+            else { continue }
+
+            for fileURL in files where fileURL.pathExtension == "json" {
+                result.append(fileURL)
+            }
+        }
+        return result
+    }
+
+    /// Submits the unsynced reports in one file.
+    private func syncFile(at fileURL: URL) async -> SyncStep {
+        guard let file = loadFile(at: fileURL) else { return .next }
+
+        for entry in file.entries {
+            guard CheatWorksConfig.isEnabled else { return .stop }
+            guard let status = entry.status, entry.cheatWorksSynced != true,
+                  let emulatorCode = CheatWorksConfig.emulatorCode(for: entry.coreIdentifier)
+            else { continue }
+
+            let feedback = CheatWorksFeedback(
+                gameFingerprint: file.md5,
+                cheatCode: entry.rawCode ?? entry.code,
+                status: Self.cheatWorksStatus(for: status),
+                emulator: CheatWorksEmulator(emulatorCode, version: entry.coreVersion),
+                gameName: file.gameName,
+                provider: entry.provider)
+
+            do {
+                _ = try await CheatWorksConfig.service.submitFeedback(feedback, localSyncMode: true)
+                markSynced(code: entry.code, coreIdentifier: entry.coreIdentifier, coreVersion: entry.coreVersion, status: status, at: fileURL)
+            } catch CheatWorksServiceError.rateLimited(let retryAfter) {
+                return .rateLimited(retryAfter: retryAfter)
+            } catch CheatWorksAuthError.installationRevoked {
+                return .stop
+            } catch {
+                // Transient/other error (e.g. server unreachable) — leave this entry unsynced and
+                // move on; it retries on the next launch.
+            }
+        }
+        return .next
+    }
+
+    /// Flags the matching report synced, but only if its verdict still equals `status` — so a value
+    /// the user changed after we submitted isn't marked synced for the wrong verdict. Locked, since a
+    /// user edit may be writing the same file on the main thread.
+    private func markSynced(code: String, coreIdentifier: String, coreVersion: String, status: CheatFeedbackStatus, at fileURL: URL) {
+        fileWriteLock.lock()
+        defer { fileWriteLock.unlock() }
+
+        guard var file = loadFile(at: fileURL) else { return }
+        let key = Self.key(for: code)
+        var changed = false
+        for index in file.entries.indices
+        where Self.key(for: file.entries[index].code) == key
+            && file.entries[index].coreIdentifier == coreIdentifier
+            && file.entries[index].coreVersion == coreVersion
+            && file.entries[index].status == status
+            && file.entries[index].cheatWorksSynced != true {
+            file.entries[index].cheatWorksSynced = true
+            changed = true
+        }
+        if changed { saveFile(file, at: fileURL) }
+    }
+
+    private static func cheatWorksStatus(for status: CheatFeedbackStatus) -> CheatWorksFeedbackStatus {
+        switch status {
+        case .works: return .works
+        case .doesNotWork: return .doesNotWork
+        case .unknown: return .notSure
+        }
+    }
+
+    /// Submits a single just-recorded report to CheatWorks and marks it synced on success. Fire-and-
+    /// forget on a background task; any failure (offline, rate-limited, revoked) leaves it unsynced
+    /// for the next-launch sync. Never blocks the caller.
+    private func submitToCheatWorks(status: CheatFeedbackStatus, code: String, rawCode: String?, md5: String,
+                                    systemIdentifier: String, coreIdentifier: String, coreVersion: String,
+                                    gameName: String?, provider: String?) {
+        guard CheatWorksConfig.isEnabled,
+              CheatWorksConfig.isClientTokenConfigured,
+              let emulatorCode = CheatWorksConfig.emulatorCode(for: coreIdentifier),
+              let url = fileURL(md5: md5, systemIdentifier: systemIdentifier)
+        else { return }
+
+        // The exact code the server aggregates its rating under, so a rating refresh can key on it.
+        let submittedCode = rawCode ?? code
+
+        let feedback = CheatWorksFeedback(
+            gameFingerprint: md5,
+            cheatCode: submittedCode,
+            status: Self.cheatWorksStatus(for: status),
+            emulator: CheatWorksEmulator(emulatorCode, version: coreVersion),
+            gameName: gameName,
+            provider: provider)
+
+        Task {
+            guard CheatWorksConfig.isEnabled else { return }
+            do {
+                _ = try await CheatWorksConfig.service.submitFeedback(feedback)
+                self.markSynced(code: code, coreIdentifier: coreIdentifier, coreVersion: coreVersion, status: status, at: url)
+                // The server evicts its ratings cache on accept, so this code's rating can now be
+                // re-fetched fresh — tell any interested UI which code to refresh.
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .cheatWorksFeedbackDidSubmit, object: nil, userInfo: [
+                        Self.cheatWorksSubmissionRawCodeKey: submittedCode,
+                        Self.cheatWorksSubmissionMD5Key: md5,
+                        Self.cheatWorksSubmissionSystemIdentifierKey: systemIdentifier,
+                        Self.cheatWorksSubmissionCoreIdentifierKey: coreIdentifier,
+                        Self.cheatWorksSubmissionCoreVersionKey: coreVersion,
+                    ])
+                }
+            } catch {
+                // Offline / rate-limited / revoked — leave unsynced; the next-launch sync retries.
+            }
+        }
+    }
+
+    // MARK: - Storage
+
+    /// Mirrors the `CheatDatabase/` layout so feedback sits beside the cached
+    /// provider data, one folder per system.
+    private func fileURL(md5: String, systemIdentifier: String) -> URL? {
+        guard let base = OELibraryDatabase.default?.databaseFolderURL else { return nil }
+        return base
+            .appendingPathComponent("CheatFeedback", isDirectory: true)
+            .appendingPathComponent(systemIdentifier, isDirectory: true)
+            .appendingPathComponent("\(md5.uppercased()).json")
+    }
+
+    private func feedbackRootURL() -> URL? {
+        OELibraryDatabase.default?.databaseFolderURL.appendingPathComponent("CheatFeedback", isDirectory: true)
+    }
+
+    /// Decodes a feedback file at a known URL (used by the sync, which walks folders directly).
+    private func loadFile(at url: URL) -> CheatFeedbackFile? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(CheatFeedbackFile.self, from: data)
+    }
+
+    private func saveFile(_ file: CheatFeedbackFile, at url: URL) {
+        do {
+            try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(file).write(to: url, options: .atomic)
+        } catch {
+            // best-effort; a failed mark-synced just means it retries next launch
+        }
+    }
+
+    private func load(md5: String, systemIdentifier: String) -> CheatFeedbackFile? {
+        guard let url = fileURL(md5: md5, systemIdentifier: systemIdentifier),
+              let data = try? Data(contentsOf: url)
+        else { return nil }
+
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(CheatFeedbackFile.self, from: data)
+        } catch {
+            // log.error("Failed to read cheat feedback for \(md5): \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func save(_ file: CheatFeedbackFile, md5: String, systemIdentifier: String) {
+        guard let url = fileURL(md5: md5, systemIdentifier: systemIdentifier) else { return }
+
+        do {
+            // Created here rather than when resolving the URL, so reads leave no folders behind.
+            try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(file).write(to: url, options: .atomic)
+        } catch {
+            // log.error("Failed to write cheat feedback for \(md5): \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Migration
+
+    /// One-time reconciliation for files written before `rawCode`/`provider`/`gameName`/
+    /// `systemIdentifier` existed. Must be called before any game can load, so the still-cached
+    /// provider databases on disk reflect whatever normalization produced the original entries,
+    /// before this session gets a chance to refresh them (e.g. via an ETag-driven re-download).
+    ///
+    /// Synchronous by design: negligible cost at current scale (few users, few systems, few
+    /// feedback files), and it avoids any race with game loading altogether.
+    func migrateIfNeeded() {
+        guard let root = feedbackRootURL() else { return }
+        let configURL = root.appendingPathComponent("config.json")
+
+        var config = loadMigrationConfig(at: configURL) ?? CheatFeedbackMigrationConfig(schemaVersion: 1)
+        guard config.schemaVersion < Self.schemaVersion else { return }
+
+        // Only bump schemaVersion after a clean full pass: a transient directory-read failure would
+        // otherwise mark the migration done and permanently skip the unread files on later launches.
+        var cleanPass = true
+
+        if let systemDirs = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey]) {
+            let libretro = LibretroCheatProvider()
+            let openEmu = OpenEmuCheatProvider()
+
+            for systemDir in systemDirs {
+                guard (try? systemDir.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
+                let systemIdentifier = systemDir.lastPathComponent
+                guard let files = try? fileManager.contentsOfDirectory(at: systemDir, includingPropertiesForKeys: nil) else {
+                    cleanPass = false
+                    continue
+                }
+                for fileURL in files where fileURL.pathExtension == "json" {
+                    migrateFile(at: fileURL, systemIdentifier: systemIdentifier, libretro: libretro, openEmu: openEmu)
+                }
+            }
+        } else if fileManager.fileExists(atPath: root.path) {
+            // A read failure on an existing directory should retry next launch. A root that simply
+            // doesn't exist yet (fresh install / never used feedback) has nothing to migrate — that's
+            // a clean pass, so let the version bump and short-circuit instead of re-walking forever.
+            cleanPass = false
+        }
+
+        guard cleanPass else { return }
+        config.schemaVersion = Self.schemaVersion
+        saveMigrationConfig(config, at: configURL)
+    }
+
+    /// Backfills `rawCode`/`provider` from the still-cached provider databases (matched by
+    /// normalized code), `gameName`/`systemIdentifier`, and `serial` from the ROM library (a second
+    /// fallback identifier alongside MD5, already stored there independent of any game/core running —
+    /// unlike the RetroAchievements hash, which only exists once a core has actually loaded the ROM
+    /// and so can never be recovered during this startup-only migration).
+    /// Entries with no match in either cache (already cleared, or never cached) are left as-is —
+    /// this is best-effort, not a guaranteed reconciliation.
+    private func migrateFile(at fileURL: URL, systemIdentifier: String, libretro: LibretroCheatProvider, openEmu: OpenEmuCheatProvider) {
+        guard let data = try? Data(contentsOf: fileURL) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard var file = try? decoder.decode(CheatFeedbackFile.self, from: data), file.schemaVersion < Self.schemaVersion
+        else { return }
+
+        let openEmuLookup = openEmu.migrationLookup(forMD5: file.md5, systemIdentifier: systemIdentifier)
+        let libretroLookup = libretro.migrationLookup(forMD5: file.md5, systemIdentifier: systemIdentifier)
+
+        var openEmuByCode: [String: String] = [:]
+        for cheat in openEmuLookup?.cheats ?? [] {
+            openEmuByCode[Self.key(for: cheat.code)] = cheat.rawCode
+        }
+        var libretroByCode: [String: String] = [:]
+        for cheat in libretroLookup?.cheats ?? [] {
+            libretroByCode[Self.key(for: cheat.code)] = cheat.rawCode
+        }
+
+        file.systemIdentifier = systemIdentifier
+        // OpenEmu is tried first everywhere else (CheatDatabaseService's provider precedence,
+        // first-match-wins on a duplicate code), so mirror that order here too.
+        file.gameName = file.gameName ?? openEmuLookup?.gameName ?? libretroLookup?.gameName
+        if file.serial == nil, let context = OELibraryDatabase.default?.mainThreadContext {
+            // The migration-retry path reaches here off the main queue, so confine the fetch to the
+            // main-queue context. `performAndWait` is reentrant-safe on the normal main-thread path.
+            context.performAndWait {
+                file.serial = (try? OEDBRom.rom(withMD5HashString: file.md5, in: context))?.serial
+            }
+        }
+
+        for index in file.entries.indices {
+            let code = Self.key(for: file.entries[index].code)
+            guard file.entries[index].rawCode == nil || file.entries[index].provider == nil else { continue }
+            if let rawCode = openEmuByCode[code] {
+                file.entries[index].rawCode = file.entries[index].rawCode ?? rawCode
+                file.entries[index].provider = file.entries[index].provider ?? openEmu.name
+            } else if let rawCode = libretroByCode[code] {
+                file.entries[index].rawCode = file.entries[index].rawCode ?? rawCode
+                file.entries[index].provider = file.entries[index].provider ?? libretro.name
+            }
+        }
+
+        file.schemaVersion = Self.schemaVersion
+
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(file).write(to: fileURL, options: .atomic)
+        } catch {
+            // log.error("Failed to write migrated cheat feedback for \(file.md5): \(error.localizedDescription)")
+        }
+    }
+
+    private func loadMigrationConfig(at url: URL) -> CheatFeedbackMigrationConfig? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(CheatFeedbackMigrationConfig.self, from: data)
+    }
+
+    private func saveMigrationConfig(_ config: CheatFeedbackMigrationConfig, at url: URL) {
+        do {
+            try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(config).write(to: url, options: .atomic)
+        } catch {
+            // log.error("Failed to write cheat feedback migration config: \(error.localizedDescription)")
+        }
+    }
+}

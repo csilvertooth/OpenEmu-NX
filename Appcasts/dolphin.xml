@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+  xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Dolphin</title>
+                <item>
+      <title>Dolphin 5.0.16211.2</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.4.0/Dolphin.oecoreplugin.zip"
+        sparkle:version="5.0.16211.2"
+        sparkle:shortVersionString="5.0.16211.2"
+        length="8927609"
+        sparkle:edSignature="MGZ/twNuqaEZhlO24WLTNCh8lztAcHqjFR0Is+7DtWugd0KKXOr71rG12pfaiIxVObgC8JWYcMWawBHTgI76BA=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Dolphin 5.0.16211.1</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.7/Dolphin.oecoreplugin.zip"
+        sparkle:version="5.0.16211.1"
+        sparkle:shortVersionString="5.0.16211.1"
+        length="8927608"
+        sparkle:edSignature="QCAoQgcL4MsQvTqMAIo5ODZvATcyUlfLm6xehYriT8byvh95lsz1ocasyOk1KNPk27XAZbTB0L+/6qZs0rPyAA=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Dolphin 5.0.16211</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.1/Dolphin.oecoreplugin.zip"
+        sparkle:version="5.0.16211"
+        sparkle:shortVersionString="5.0.16211"
+        length="8950726"
+        sparkle:edSignature="RRAIxzCmLGRmLVsVqoDoCmNpdP8OziD4jSNEja22qkoDqi7rA5BEtaZUB7ypwHvdDyZMtdOqqzQNWbPRJF0WDQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Dolphin 5.0.16211</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.1.0/Dolphin.oecoreplugin.zip"
+        sparkle:version="5.0.16211"
+        sparkle:shortVersionString="5.0.16211"
+        length="8950726"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>

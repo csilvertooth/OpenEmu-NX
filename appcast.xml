@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>OpenEmu-NX updates</title>
+    <link>https://github.com/csilvertooth/OpenEmu-NX/releases</link>
+    <description>No automatic app updates are published yet.</description>
+    <language>en</language>
+  </channel>
+</rss>

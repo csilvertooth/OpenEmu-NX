@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+  xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>BSNES</title>
+                      <item>
+      <title>BSNES 115.4</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.5.0/BSNES.oecoreplugin.zip"
+        sparkle:version="115.4"
+        sparkle:shortVersionString="115.4"
+        length="924104"
+        sparkle:edSignature="btJd/a1Ong9dnK3ZO7JVUyvrYfW6tr1lSReHNuyxtSbjjcf5Im30wH6zrNVcRafQg2cXrw5M8G1VsaMAeFtdDA=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>BSNES 115.3</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.6/BSNES.oecoreplugin.zip"
+        sparkle:version="115.3"
+        sparkle:shortVersionString="115.3"
+        length="921031"
+        sparkle:edSignature="WLH2GgQ+1Ig8U5+tTFrecyYHgaBQLZ8sMEC8rYNNbdKZMSZUMDyzx52hXHwtJxxvtxb5x7uWw74goZheciOPBQ=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>BSNES 115.2</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.3/BSNES.oecoreplugin.zip"
+        sparkle:version="115.2"
+        sparkle:shortVersionString="115.2"
+        length="1793227"
+        sparkle:edSignature="DzNb48yaC++NRTY29ujCouup8o7c3a70gLQDOA+qepkGkn6PndBS4q8XfUriFaSuxBom52+o1Q1fdvVR/PkdCg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>BSNES 115.1</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.1/BSNES.oecoreplugin.zip"
+        sparkle:version="115.1"
+        sparkle:shortVersionString="115.1"
+        length="918222"
+        sparkle:edSignature="fockm1m+YcjKs908ryIDOT79Z1ZQDLf09ulGX9s+x6YGcm2ZE2OmD4hWLgu/0onAFWcEJFZFZMOhKyHS7zoIAA=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>BSNES 115</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.2.0/BSNES.oecoreplugin.zip"
+        sparkle:version="115"
+        sparkle:shortVersionString="115"
+        length="918198"
+        type="application/octet-stream" />
+    </item>
+</channel>
+</rss>

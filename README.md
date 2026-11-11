@@ -1,0 +1,45 @@
+# OpenEmu-NX
+
+**Classic games. Together.**
+
+OpenEmu-NX is a Mac-first netplay fork of [OpenEmu-Silicon](https://github.com/OpenEmu-Silicon/OpenEmu-Silicon), built on [OpenEmu](https://github.com/OpenEmu/OpenEmu). It keeps the imported game library and native Mac interface while adding shared play.
+
+This is an early testing release. Network Play currently supports **two-player Super Mario Kart NTSC v1.0**, with each player providing their own matching game file. Local emulation retains the upstream core architecture; Network Play uses a separate portable Snes9x runtime. Broader core support does not imply netplay support for those systems.
+
+## Network Play
+
+- Host public games or private rooms with readable invite codes.
+- Match the host’s game against your imported library by SHA-256 before joining.
+- Find public games across approved relays.
+- Optional room passwords and spectator viewing.
+- Rollback simulation with state-hash diagnostics.
+- Direct-first invite connections with authenticated TURN fallback through Valve GameNetworkingSockets.
+- Host multiplayer saves, then reconnect and resume together.
+
+The current network helper requires an Apple Silicon Mac on macOS 14 or newer. ROMs and BIOS files are not included.
+
+## Get started
+
+See [testing and network play](docs/TESTING.md), [build instructions](docs/BUILDING.md), and [architecture](docs/ARCHITECTURE.md). Release packages, when published, will appear under [OpenEmu-NX Releases](https://github.com/csilvertooth/OpenEmu-NX/releases).
+
+Automatic app updates remain disabled until this project's own signed update feed is ready. Core updates use their existing upstream channels. Do not install an unsigned app update from a third-party mirror.
+
+## Data and preferences
+
+OpenEmu-NX has its own data folder and app identity. Existing OpenEmu data can be copied without deleting the original, and custom library locations are preserved. Settings → Library provides a shortcut to the data folder. Core/library visibility controls determine which systems appear in the sidebar. See [data folders and fork configuration](docs/fork-data-configuration.md) for migration behavior and the settings a downstream fork should change.
+
+## Project scope
+
+This repository contains the app, runtime, core wrappers and vendored dependencies. The hosted lobby, relay directory backend, infrastructure and deployment tooling are intentionally not included yet. Client protocol handling remains in the runtime so it can connect to the configured services.
+
+The initial public snapshot has a new Git history. Original attribution, license files and copyright headers remain; upstream history is available through the projects linked in [credits and dependencies](docs/THIRD_PARTY.md).
+
+## Contribute
+
+Use an issue to report the app version, macOS version, Mac model, game revision, and steps to reproduce. Remove passwords, invite codes for active private games, tokens, local paths and personal information from diagnostics before posting. Do not upload ROMs or BIOS files.
+
+Preserve licenses and copyright headers, make focused changes, and test the behavior you change. Signing identities, credentials, release artifacts, local libraries and private infrastructure do not belong in commits. See [security](.github/SECURITY.md).
+
+## Credits and licenses
+
+OpenEmu-NX depends on extensive work by the OpenEmu, OpenEmu-Silicon, emulator-core and networking communities. [THIRD_PARTY.md](docs/THIRD_PARTY.md) identifies the major projects; [upstream credits](docs/UPSTREAM_CREDITS.md) preserve the inherited acknowledgments. The root [LICENSE](LICENSE) covers the frontend where applicable. Components retain their own licenses; there is no single license for the whole tree. Some cores have non-commercial restrictions.

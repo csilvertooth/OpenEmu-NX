@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Allow loading emulation core plugins (.oecoreplugin bundles) that may
+	     contain dylibs not signed by the same team as the main app. Without
+	     this, hardened runtime library validation will reject core plugins on
+	     launch and produce "The <core> core has quit unexpectedly". -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	<!-- Allow JIT compilation via MAP_JIT. Used by dynarec cores (Mupen64Plus,
+	     mGBA, Dolphin, Flycast, etc.) that explicitly opt into MAP_JIT. -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<!-- Allow executing anonymous pages made executable via mprotect, without
+	     MAP_JIT. Required for PPSSPP on macOS 26, where MAP_JIT + W^X enforcement
+	     causes the Emu thread to stall. PPSSPP uses plain mmap + mprotect, which
+	     works on all macOS versions and avoids MAP_JIT complexity entirely. -->
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>

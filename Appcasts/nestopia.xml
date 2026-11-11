@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+  xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Nestopia</title>
+                                    <item>
+      <title>Nestopia 1.52.5.2</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.5.0/Nestopia.oecoreplugin.zip"
+        sparkle:version="1.52.5.2"
+        sparkle:shortVersionString="1.52.5.2"
+        length="812367"
+        sparkle:edSignature="LsWZIyDpDG3KuTlC6xhxS/qwecDgv917fdlDckt4A4Dn5xVPhRusfdZIbmegv58lC0Q4Zhbws5YToIfnQSruDg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Nestopia 1.52.5.1</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.4.0/Nestopia.oecoreplugin.zip"
+        sparkle:version="1.52.5.1"
+        sparkle:shortVersionString="1.52.5.1"
+        length="808024"
+        sparkle:edSignature="R/km+60tX217ySoGQFTm5PxQ1W4q7rHwkrON6CC0K2mW3jtDXUgIKti2jyw8LNbg3xfAybguiF+cZl2zm11pBA=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Nestopia 1.52.5</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.6/Nestopia.oecoreplugin.zip"
+        sparkle:version="1.52.5"
+        sparkle:shortVersionString="1.52.5"
+        length="807805"
+        sparkle:edSignature="pMO1F+7gFrOvhZ43BGlGGB8UWtIbi0dQJqv4HZvpPQ3/Ie7jlBSMAyWBAmW1uD5hH5M85WT2buEKfNlLQTlLDw=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Nestopia 1.52.4</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.5/Nestopia.oecoreplugin.zip"
+        sparkle:version="1.52.4"
+        sparkle:shortVersionString="1.52.4"
+        length="807204"
+        sparkle:edSignature="BnsPCfNGVDhjEbfkwrqKeeIdE5+OAgaKQOHPBaEPHgTIUpIuvD26DGd0rrNE3BboK1MjPPB79b0qUXEyG5kWAg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Nestopia 1.52.3</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.3/Nestopia.oecoreplugin.zip"
+        sparkle:version="1.52.3"
+        sparkle:shortVersionString="1.52.3"
+        length="1525655"
+        sparkle:edSignature="j5W7+UO7XMDShihI2PbvrzwrY7r19rQYn8fntOJQhqm3rx8t7t3mwS+15kffxEpo+iO+YzunLTTPxpI+Ihu3Bw=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Nestopia 1.52.2</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.2/Nestopia.oecoreplugin.zip"
+        sparkle:version="1.52.2"
+        sparkle:shortVersionString="1.52.2"
+        length="1518192"
+        sparkle:edSignature="J3LKSeuTs09JF8n2E7r/yR+fgJNr4tFszGSpxv5M9QsmIsL5jEIuzYkGOWHdnT+orcnKdMUcXFerL5OVCCO3Bg=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Nestopia 1.52.1</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.3.1/Nestopia.oecoreplugin.zip"
+        sparkle:version="1.52.1"
+        sparkle:shortVersionString="1.52.1"
+        length="800024"
+        sparkle:edSignature="vZ/Pv8O8rZRo7sKrukSQ6bRVQ7u9bMAryvaxR+vz1UrWyPz0P7PexEmoz6XP2bOsl1Q9CDnxqr5A7hgahGppDA=="
+        type="application/octet-stream" />
+    </item>
+<item>
+      <title>Nestopia 1.52</title>
+      <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/releases/download/cores-v1.0.0/Nestopia.oecoreplugin.zip"
+        sparkle:version="1.52"
+        sparkle:shortVersionString="1.52"
+        length="637866"
+        type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>
