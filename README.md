@@ -40,6 +40,10 @@ Starting with 0.1.4, the app checks this repository's signed update feed. Downlo
 
 OpenEmu-NX has its own data folder and app identity. Existing OpenEmu data can be copied without deleting the original, and custom library locations are preserved. Settings → Library provides a shortcut to the data folder. Core/library visibility controls determine which systems appear in the sidebar. See [data folders and fork configuration](docs/fork-data-configuration.md) for migration behavior and the settings a downstream fork should change.
 
+## Future releases
+
+The roadmap includes **tvOS (Apple TV), iOS/iPadOS, Windows, and Raspberry Pi**. These are future planning targets, not currently supported releases or promised delivery dates. See the [future release roadmap](docs/ROADMAP.md).
+
 ## Project scope
 
 This repository contains the app, runtime, core wrappers and vendored dependencies. The hosted lobby, relay directory backend, infrastructure and deployment tooling are intentionally not included yet. Client protocol handling remains in the runtime so it can connect to the configured services.
