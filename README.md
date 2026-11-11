@@ -1,4 +1,4 @@
-![OpenEmu-NX — Classic games. Together.](docs/assets/openemu-nx-banner.svg)
+![OpenEmu-NX — Classic games. Together.](docs/assets/openemu-nx-banner.svg?v=7da03d70)
 
 <p align="center">
   <a href="https://github.com/csilvertooth/OpenEmu-NX/releases"><img alt="Testing release" src="https://img.shields.io/github/v/release/csilvertooth/OpenEmu-NX?include_prereleases&amp;style=flat-square&amp;color=9567ed" /></a>
