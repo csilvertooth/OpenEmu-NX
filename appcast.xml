@@ -2,10 +2,20 @@
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
 --><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
   <channel>
-    <title>OpenEmu-NX testing updates</title>
+    <title>OpenEmu-NX beta updates</title>
     <link>https://github.com/csilvertooth/OpenEmu-NX/releases</link>
-    <description>Signed OpenEmu-NX testing releases.</description>
+    <description>Signed OpenEmu-NX beta releases.</description>
     <language>en</language>
+    <item>
+      <title>OpenEmu-NX 0.1.7-beta.1</title>
+      <link>https://github.com/csilvertooth/OpenEmu-NX/releases/tag/v0.1.7-beta.1</link>
+      <sparkle:version>47</sparkle:version>
+      <sparkle:shortVersionString>0.1.7-beta.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <pubDate>Wed, 11 Nov 2026 23:30:51 +0000</pubDate>
+      <description>Central lobby, live room updates, direct-first connections, clearer player names and a new D-pad icon.</description>
+      <enclosure url="https://github.com/csilvertooth/OpenEmu-NX/releases/download/v0.1.7-beta.1/OpenEmu-NX-0.1.7-beta.1.dmg" length="52264439" type="application/octet-stream" sparkle:edSignature="jWQZ/M2Wo9YdUdstshbJeaOnVi8/6EvadgW/5hx1uoCO2qW9EDygCzddGh0X2cCsKrm8M/ST0AduUvq5/15/Cg=="></enclosure>
+    </item>
     <item>
       <title>OpenEmu-NX 0.1.6</title>
       <link>https://github.com/csilvertooth/OpenEmu-NX/releases/tag/v0.1.6</link>
@@ -38,6 +48,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: bq8DVugwg0iWDD0tVkZ/aJFQhiqDhxPX2y3E+je5ECSJznneHypmY33IF6moRDNECEqNPqn4WrG4VdNOn80iCQ==
-length: 3236
+edSignature: N8q7fD5bxmGSf3rVgUqioySwjeqY81wYhbdnQy3i9fhvskBZ7h76SphfCUzfMfSYoL4eKRwHSbkydJz4EFE8DA==
+length: 4072
 -->
