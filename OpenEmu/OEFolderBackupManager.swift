@@ -223,7 +223,7 @@ enum OEExtraSaveLocations {
 /// Backs up battery saves, save states, and BIOS files to a user-chosen folder.
 ///
 /// The backup mirrors the OpenEmu Application Support directory structure exactly:
-///   local:  `~/Library/Application Support/OpenEmu/Save States/…`
+///   local:  `<configured application data folder>/Save States/…`
 ///   backup: `{backupFolder}/Save States/…`
 ///
 /// If the user points the backup folder at a location inside iCloud Drive

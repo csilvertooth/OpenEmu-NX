@@ -1,5 +1,16 @@
 # OpenEmu-NX changes
 
+## 0.1.5 testing
+
+- Add safe IPS, BPS and UPS ROM patching, with SNES as the primary target and other cartridge systems marked experimental.
+- Add base-game cover artwork and mod-name overlays, including a right-click option for already patched games.
+- Fix helper-launch failures that prevented games from starting.
+- Add public/custom STUN options and a wider Network Check with troubleshooting guidance and current-session route reporting.
+- Add optional host-approved, player-only ROM downloads with ownership confirmation, SHA-256 verification and normal library import placement. Spectators cannot download.
+- Show updated What's New notes once on the first launch of this version; refresh first-run setup notes and NX branding.
+
+Validation: two Apple Silicon Macs completed 600 synchronized frames per test for direct play, Automatic relay fallback with direct candidates excluded by the test harness, and reconnection after a peer ROM download. Rejection checks covered disabled sharing and spectator downloads. This is not a fresh separate-ISP/hotspot test, nor a new subjective audio/controller test.
+
 ## 0.1.4 testing
 
 - Enable GitHub-hosted app updates with NX-owned Ed25519 signatures for both the feed and installer.

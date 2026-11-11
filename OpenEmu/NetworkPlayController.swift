@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Chris Silvertooth. SPDX-License-Identifier: BSD-3-Clause
 import Cocoa
 import CoreData
+import Network
 
 private final class NetworkPlayNoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -18,6 +19,8 @@ private struct NetworkPlayProgress: Sendable {
     let saved: UInt64
     let saveError: String
     let lobbyReconnecting: Bool
+    let networkRoute: String
+    let networkRTT: Int
 
     nonisolated static func read(_ url: URL) -> NetworkPlayProgress? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
@@ -31,7 +34,9 @@ private struct NetworkPlayProgress: Sendable {
                                    confirmed: number("confirmed_frame"), videoFrames: number("received_video_frames"),
                                    saved: number("save_completed_frame"),
                                    saveError: String((object["save_error"] as? String ?? "").prefix(512)),
-                                   lobbyReconnecting: object["lobby_reconnecting"] as? Bool ?? false)
+                                   lobbyReconnecting: object["lobby_reconnecting"] as? Bool ?? false,
+                                   networkRoute: object["network_route"] as? String ?? "connecting",
+                                   networkRTT: (object["network_rtt_ms"] as? NSNumber)?.intValue ?? -1)
     }
 }
 
@@ -45,11 +50,20 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     private let name = NSTextField(string: "")
     private let endpoint = NSTextField(string: "")
     private let route = NSPopUpButton()
+    private let stunProvider = NSPopUpButton()
+    private let customSTUN = NSTextField(string: "")
+    private let networkResult = NSTextField(wrappingLabelWithString: "Check this network before playing. Direct connectivity is confirmed when both players connect.")
+    private var networkCheckRunning = false
+    private var liveRoute = "connecting"
+    private var liveRTT = -1
     private let delay = NSPopUpButton()
     private let title = NSTextField(string: "")
     private let publicRoom = NSButton(checkboxWithTitle: "List this game publicly", target: nil, action: nil)
     private let protectedRoom = NSButton(checkboxWithTitle: "Require a room password", target: nil, action: nil)
     private let password = NSSecureTextField(string: "")
+    private let shareROM = NSButton(checkboxWithTitle: "Allow Player 2 to download this ROM", target: nil, action: nil)
+    private var transferProcess: Process?
+    private let cancelTransferButton = NSButton(title: "Cancel ROM Transfer", target: nil, action: nil)
     private let spectators = NSButton(checkboxWithTitle: "Allow spectators", target: nil, action: nil)
     private let spectatorLimit = NSPopUpButton()
     private let invite = NSTextField(string: "")
@@ -195,6 +209,10 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             defaults.set(true, forKey: prefix + "automaticRoutingV1")
         }
         route.selectItem(at: min(max(defaults.integer(forKey: prefix + "route"), 0), 2))
+        stunProvider.addItems(withTitles: ["Cloudflare (public)", "Custom STUN server", "Lobby-provided STUN"])
+        stunProvider.selectItem(at: min(max(defaults.integer(forKey: prefix + "stunProvider"), 0), 2))
+        customSTUN.stringValue = defaults.string(forKey: prefix + "customSTUN") ?? ""
+        customSTUN.placeholderString = "stun.example.com:3478"
         delay.addItems(withTitles: (1...12).map { "\($0) frames" })
         delay.selectItem(at: min(max(defaults.integer(forKey: prefix + "delay") - 1, 0), 11))
         if defaults.object(forKey: prefix + "delay") == nil { delay.selectItem(at: 2) }
@@ -227,11 +245,12 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         resumeGameButton = button("Resume Multiplayer Game…", #selector(chooseMultiplayerSave))
         newGameButton = button("New Game", #selector(clearMultiplayerSave))
         tab("Host Game", [row("Room name", title), publicRoom, protectedRoom, row("Password", password),
-                          spectators, row("Watcher limit", spectatorLimit),
+                          spectators, row("Watcher limit", spectatorLimit), shareROM,
                           label("Watchers use the room password and separate slots. Private games stay unlisted."),
                           NSStackView(views: [createButton, updateButton]), resumeLabel,
                           NSStackView(views: [resumeGameButton, newGameButton]),
                           label("Multiplayer saves rebuild the shared game before starting. Long sessions may take time to load. Current game support is Super Mario Kart.")])
+        cancelTransferButton.target = self; cancelTransferButton.action = #selector(cancelROMTransfer); cancelTransferButton.isHidden = true
         tab("Join with Invite", [row("Invite code", invite), row("Password", joinPassword), row("Join as", joinRole), joinButton])
         rebuildRelayPicker()
         relayPicker.target = self; relayPicker.action = #selector(selectRelay)
@@ -242,6 +261,9 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         tab("Relays", [makeDirectoryTable(relayTable, columns: [("name", "Relay / Region", 220), ("operator", "Operator", 180), ("health", "Status", 140)]),
                        NSStackView(views: [button("Refresh Relays", #selector(refreshDirectory)), button("Use Selected Relay", #selector(useSelectedRelay)), button("Register a Relay…", #selector(registerRelay))])])
         tab("Settings", [row("Display name", name), row("Lobby server", endpoint), row("Connection", route),
+                         row("STUN service", stunProvider), row("Custom server", customSTUN),
+                         label("STUN discovers a route; it does not carry gameplay. The selected provider sees your public network address. Changes apply to the next connection."),
+                         button("Check Network…", #selector(checkNetwork)), networkResult,
                          row("Input response", label("Rollback · no added input delay")),
                          label("Both players need a rollback-compatible build. Automatic negotiates a direct connection or a configured relay. Relay only requires a lobby with TURN service. Internet lobbies require HTTPS."), saveButton])
         chooseButton = button("Choose Game…", #selector(chooseGame))
@@ -250,7 +272,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         launchButton = button("Connect to Game", #selector(launchGame))
         let top = NSStackView(views: [gameLabel, chooseButton]); top.orientation = .horizontal
         status.textColor = .secondaryLabelColor
-        let stack = NSStackView(views: [top, row("Host / Invite relay", relayPicker), tabs, roomStatus, status, label("The host’s multiplayer game saves automatically. To keep a separate copy, use Network Play → Export Multiplayer Save. Closing this panel keeps you connected; use Leave Room to disconnect."), NSStackView(views: [launchButton, leaveButton, copyButton])])
+        let stack = NSStackView(views: [top, row("Host / Invite relay", relayPicker), tabs, roomStatus, status, label("The host’s multiplayer game saves automatically. To keep a separate copy, use Network Play → Export Multiplayer Save. Closing this panel keeps you connected; use Leave Room to disconnect."), NSStackView(views: [launchButton, leaveButton, copyButton, cancelTransferButton])])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false; panel.contentView!.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: panel.contentView!.leadingAnchor, constant: 20),
@@ -274,6 +296,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     private func refreshControls() {
         guard panel != nil else { return }
         for button in operationButtons { button.isEnabled = !busy }
+        shareROM.isEnabled = !busy && gameProcess == nil
         resumeGameButton.isEnabled = !busy && room == nil && gameProcess == nil
         newGameButton.isEnabled = !busy && room == nil && resumeURL != nil
         let isHost = room?["role"] as? String == "host"
@@ -331,11 +354,13 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
             var config: [String: Any] = ["endpoint": base.absoluteString, "room_id": id, "token": self.memberToken,
                                        "rom": url.path, "rollback": true, "connection": ["automatic", "direct", "relay"][self.route.indexOfSelectedItem], "audio_report": diagnostics.path, "delay": self.delay.indexOfSelectedItem + 1]
+            if let servers = try self.selectedSTUN() { config["stun_servers"] = servers }
             if self.route.indexOfSelectedItem != 1 {
                 // Request room-scoped relay credentials once before play.
                 // Direct-only play does not request relay access.
                 config["relay_network"] = try await self.authorizeRelay(base, roomID: id)
             }
+            config["allow_rom_transfer"] = self.shareROM.state == .on
             self.currentAutosaveURL = nil
             if self.room?["role"] as? String == "host" {
                 let folder = URL.oeApplicationSupportDirectory.appendingPathComponent("Multiplayer Sessions/Autosaves", isDirectory: true)
@@ -391,6 +416,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     }
     private func applyProgress(_ progress: NetworkPlayProgress, id: UUID) {
         guard progressID == id, gameProcess != nil else { return }
+        liveRoute = progress.networkRoute; liveRTT = progress.networkRTT
         let connected = progress.confirmed > 0 || progress.videoFrames > 0
         if connected && !gameConnected {
             gameConnected = true
@@ -528,7 +554,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             }
         } catch { status.stringValue = "Could not read your library: " + error.localizedDescription }
     }
-    private func matchLibraryGame(expectedSHA: String, profile: String) async throws {
+    private func matchLibraryGame(expectedSHA: String, profile: String, allowTransfer: Bool = false) async throws -> Bool {
         guard let context = OELibraryDatabase.default?.mainThreadContext else { throw fail("Open your game library first.") }
         let request = NSFetchRequest<OEDBRom>(entityName: OEDBRom.entityName)
         let games = try context.fetch(request).filter {
@@ -550,7 +576,18 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             let alert = NSAlert(); alert.messageText = "Matching game not found in your library"
             alert.informativeText = "No readable, uncompressed library game matches the host’s SHA-256:\n\(expectedSHA)\n\nChoose a library game to verify it, or cancel and import the matching game first. Different revisions will not connect."
             alert.addButton(withTitle: "Choose Library Game…"); alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { throw fail("Join cancelled. Import the matching game and try again. Expected SHA-256: \(expectedSHA)") }
+            if allowTransfer { alert.addButton(withTitle: "Request ROM from Host…") }
+            let answer = alert.runModal()
+            if allowTransfer && answer == .alertThirdButtonReturn {
+                let consent = NSAlert()
+                consent.messageText = "Request this ROM from the host?"
+                consent.informativeText = "Only accept if you own this game and are authorized to receive this copy. The host must enable ROM sharing and start the game. The file is sent over the peer connection, using the relay if needed. Its SHA-256 will be checked before import. Existing ROMs and saves will not be replaced."
+                consent.addButton(withTitle: "I Own the Game — Request ROM")
+                consent.addButton(withTitle: "Cancel")
+                guard consent.runModal() == .alertFirstButtonReturn else { throw fail("ROM request cancelled.") }
+                return false
+            }
+            guard answer == .alertFirstButtonReturn else { throw fail("Join cancelled. Import the matching game and try again. Expected SHA-256: \(expectedSHA)") }
             let allGames = try context.fetch(request).filter { !$0.isDeleted && $0.game != nil }
             let browser = NetworkPlayLibraryBrowser(roms: allGames, selected: selectedROM)
             libraryBrowser = browser
@@ -575,6 +612,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         gameLabel.stringValue = rom.game?.gameTitle ?? rom.game?.name ?? "Library game"
         defaults.set(rom.objectID.uriRepresentation().absoluteString, forKey: prefix + "romID")
         status.stringValue = "Matching game selected; SHA-256 verified. Joining…"
+        return true
     }
     private func identity(expectedSHA: String? = nil) async throws -> [String: Any] {
         guard let rom = selectedROM, !rom.isDeleted, rom.managedObjectContext != nil,
@@ -680,16 +718,90 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                   expected.range(of: "^[a-fA-F0-9]{64}$", options: .regularExpression) != nil else {
                 throw self.fail("The host did not provide a valid game SHA-256.")
             }
-            try await self.matchLibraryGame(expectedSHA: expected.lowercased(), profile: compatibility["profile"] as? String ?? "")
+            let haveROM = try await self.matchLibraryGame(expectedSHA: expected.lowercased(), profile: compatibility["profile"] as? String ?? "", allowTransfer: role == 0)
             var body = locator
             body["username"] = try self.displayName(); body["password"] = secret; body["role"] = role == 0 ? "player" : "spectator"
-            let identity = try await self.identity(expectedSHA: expected)
-            body["compatibility"] = identity
+            body["compatibility"] = haveROM ? try await self.identity(expectedSHA: expected) : compatibility
             let response = try await self.api(base, "POST", "v1/join", body)
             self.joinPassword.stringValue = ""; self.browsePassword.stringValue = ""
             try self.admit(response, tokenKey: "member_token", base: base)
+            if !haveROM {
+                do {
+                    try await self.receiveROM(expectedSHA: expected.lowercased(), base: base)
+                    _ = try await self.identity(expectedSHA: expected)
+                    self.status.stringValue = "ROM received, SHA-256 verified and imported. Choose Connect to Game."
+                } catch {
+                    if let id = self.room?["id"] as? String {
+                        _ = try? await self.api(base, "DELETE", "v1/rooms/" + id + "/membership", [:], token: self.memberToken)
+                    }
+                    self.clearRoom()
+                    throw error
+                }
+            }
         }
     }
+    @objc private func cancelROMTransfer() { transferProcess?.terminate() }
+    private func receiveROM(expectedSHA: String, base: URL) async throws {
+        guard let id = room?["id"] as? String, let database = OELibraryDatabase.default else { throw fail("Room or library unavailable.") }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("NX-ROM-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let title = room?["game"] as? String ?? "Network Game"
+        let safeTitle = String(title.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || " -_".unicodeScalars.contains($0) }.prefix(100))
+        let destination = directory.appendingPathComponent((safeTitle.isEmpty ? "Network Game" : safeTitle) + ".sfc")
+        var importURL = destination
+        if !UserDefaults.standard.bool(forKey: OECopyToLibraryKey) {
+            // In-place libraries need a user-selected permanent source, just as
+            // a normal local import does. Never retain a temporary download URL.
+            let save = NSSavePanel()
+            save.title = "Save Downloaded ROM"
+            save.message = "Your library keeps ROMs in their original locations. Choose where to keep this game."
+            save.directoryURL = database.romsFolderURL
+            save.nameFieldStringValue = destination.lastPathComponent
+            guard await save.beginSheetModal(for: panel) == .OK, let url = save.url else { throw fail("ROM transfer cancelled.") }
+            guard !FileManager.default.fileExists(atPath: url.path) else { throw fail("Choose a new filename; downloads never replace existing ROMs.") }
+            importURL = url
+        }
+        var launch: [String: Any] = ["endpoint": base.absoluteString, "room_id": id, "token": memberToken,
+                                   "receive_rom": destination.path, "expected_rom_sha256": expectedSHA,
+                                   "connection": "automatic", "headless": true]
+        if let servers = try selectedSTUN() { launch["stun_servers"] = servers }
+        launch["relay_network"] = try await authorizeRelay(base, roomID: id)
+        let process = Process(), input = Pipe(), output = Pipe()
+        process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/NetworkPlay/NetworkPlay.app/Contents/MacOS/emu-live")
+        process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
+        transferProcess = process
+        cancelTransferButton.isHidden = false
+        defer { transferProcess = nil; cancelTransferButton.isHidden = true }
+        status.stringValue = "Waiting for the host to enable ROM sharing and Start Game. Transfer times out after three minutes."
+        try process.run()
+        try input.fileHandleForWriting.write(contentsOf: JSONSerialization.data(withJSONObject: launch) + Data([10]))
+        try input.fileHandleForWriting.close()
+        let result = await Task.detached(priority: .utility) { () -> (Int32, Data) in
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return (process.terminationStatus, data)
+        }.value
+        guard result.0 == 0 else {
+            let response = try? JSONSerialization.jsonObject(with: result.1) as? [String: Any]
+            throw fail(response?["error"] as? String ?? "ROM transfer failed. Ask the host to allow ROM downloads, then try again.")
+        }
+        let actual = try await Task.detached(priority: .utility) { try FileManager.default.hashFile(at: destination, hashFunction: .sha256) }.value
+        guard actual == expectedSHA else { throw fail("Received ROM SHA-256 does not match the host. The file was not imported.") }
+        if importURL != destination { try FileManager.default.copyItem(at: destination, to: importURL) }
+        status.stringValue = "SHA-256 verified. Importing the received game…"
+        let romID: NSManagedObjectID? = await withCheckedContinuation { continuation in
+            let started = database.importer.importItem(at: importURL) { id in continuation.resume(returning: id) }
+            if !started { continuation.resume(returning: nil) }
+        }
+        guard let romID, let rom = try database.mainThreadContext.existingObject(with: romID) as? OEDBRom else {
+            throw fail("The ROM passed verification but could not be imported. Please retry the transfer or import your local copy.")
+        }
+        selectedROM = rom
+        gameLabel.stringValue = rom.game?.gameTitle ?? rom.game?.name ?? "Received game"
+        defaults.set(rom.objectID.uriRepresentation().absoluteString, forKey: prefix + "romID")
+    }
+
     private func admit(_ response: [String: Any], tokenKey: String, base: URL) throws {
         guard let room = response["room"] as? [String: Any], let token = response[tokenKey] as? String, room["id"] is String else { throw fail("The lobby returned an incomplete room.") }
         gameMessage = nil; self.room = room; memberToken = token; activeEndpoint = base; renderRoom()
@@ -878,11 +990,71 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         // before enabling another connection. Its handler clears gameProcess.
         if let process = gameProcess { gameStopping = true; process.terminate() }
         heartbeatTask?.cancel(); heartbeatTask = nil
+        liveRoute = "connecting"; liveRTT = -1
         room = nil; memberToken = ""; activeEndpoint = nil
         renderRoom(); refreshControls()
     }
+    private func selectedSTUN() throws -> [String]? {
+        switch stunProvider.indexOfSelectedItem {
+        case 0: return ["stun.cloudflare.com:3478"]
+        case 2: return nil
+        default:
+            let value = customSTUN.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard NXSTUNProbe.server(value) != nil else {
+                throw NSError(domain: "NetworkCheck", code: 1, userInfo: [NSLocalizedDescriptionKey: "Enter a STUN hostname and port, such as stun.example.com:3478."])
+            }
+            return [value]
+        }
+    }
+
+    @objc private func checkNetwork() {
+        guard !networkCheckRunning else { return }
+        do {
+            let servers = try selectedSTUN(), base = try baseURL()
+            networkCheckRunning = true
+            networkResult.stringValue = "Checking lobby and UDP reachability…"
+            Task { @MainActor in
+                defer { networkCheckRunning = false }
+                var results: [String] = []
+                do {
+                    _ = try await api(base, "GET", "/health")
+                    results.append("Lobby: reachable.")
+                } catch {
+                    results.append("Lobby: unavailable. Check your Internet connection and lobby address.")
+                }
+                if let server = servers?.first {
+                    let reachable = await NXSTUNProbe.check(server)
+                    results.append(reachable ? "STUN: UDP reachable." : "STUN: no valid UDP response. Try another STUN server; check whether your VPN, router or network policy blocks outbound UDP.")
+                } else {
+                    results.append("STUN: lobby settings are supplied when connecting. Select Cloudflare or Custom to run a standalone UDP check.")
+                }
+                if gameConnected && liveRoute == "direct" {
+                    results.append("Direct play: confirmed with the current player (\(liveRTT) ms round trip).")
+                } else if gameConnected && liveRoute == "relay" {
+                    results.append("Current game: relayed (\(liveRTT) ms round trip). Relay use alone does not prove direct play is impossible, especially in Relay only mode.")
+                } else {
+                    results.append("Direct play: not yet verified. Connect both players using Automatic; a STUN response alone cannot prove a direct path.")
+                }
+                results.append("If Automatic cannot connect directly: check both networks for double NAT, or ask your ISP about carrier-grade NAT and public IPv4/IPv6 access. Keep Automatic enabled to use the relay when needed. Keep your firewall enabled.")
+                networkResult.stringValue = results.prefix(2).joined(separator: " ")
+                let alert = NSAlert()
+                alert.messageText = "Network Check"
+                let details = NSTextField(wrappingLabelWithString: results.joined(separator: "\n\n"))
+                details.font = .systemFont(ofSize: 13)
+                details.preferredMaxLayoutWidth = 620
+                details.frame = NSRect(x: 0, y: 0, width: 620, height: 270)
+                alert.accessoryView = details
+                alert.addButton(withTitle: "Done")
+                _ = await alert.beginSheetModal(for: panel)
+            }
+        } catch { networkResult.stringValue = error.localizedDescription }
+    }
+
     @objc private func saveDefaults() {
         do {
+            _ = try selectedSTUN()
+            defaults.set(stunProvider.indexOfSelectedItem, forKey: prefix + "stunProvider")
+            defaults.set(customSTUN.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: prefix + "customSTUN")
             let base = try baseURL(); let user = try displayName()
             defaults.set(user, forKey: prefix + "displayName"); defaults.set(base.absoluteString, forKey: prefix + "endpoint")
             defaults.set(route.indexOfSelectedItem, forKey: prefix + "route"); defaults.set(delay.indexOfSelectedItem + 1, forKey: prefix + "delay")
@@ -1005,5 +1177,98 @@ private final class NetworkPlayLibraryBrowser: NSObject, NSTableViewDataSource, 
     private func finish(_ rom: OEDBRom?) {
         sheet.sheetParent?.endSheet(sheet); sheet.orderOut(nil)
         let callback = completion; completion = nil; callback?(rom)
+    }
+}
+
+// MARK: - Bounded UDP STUN check (no room or gameplay mutations)
+private final class NXSTUNProbe: @unchecked Sendable {
+    // All mutable state is confined to this serial queue.
+    private let queue = DispatchQueue(label: "net.openemu.nx.stun-check")
+    private var finished = false
+    private var connection: NWConnection?
+    private var completion: ((Bool) -> Void)?
+    private let transaction = (0..<12).map { _ in UInt8.random(in: 0...255) }
+
+    static func server(_ value: String) -> (String, UInt16)? {
+        guard value.range(of: "^[A-Za-z0-9.-]{1,253}:[0-9]{1,5}$", options: .regularExpression) != nil else { return nil }
+        let parts = value.split(separator: ":")
+        guard parts.count == 2, let port = UInt16(parts[1]), port > 0 else { return nil }
+        return (String(parts[0]), port)
+    }
+
+    static func validResponse(_ data: Data, transaction: [UInt8]) -> Bool {
+        let bytes = [UInt8](data)
+        guard bytes.count >= 20, bytes.count <= 2048, transaction.count == 12,
+              bytes[0] == 1, bytes[1] == 1,
+              Array(bytes[4..<8]) == [0x21, 0x12, 0xa4, 0x42],
+              Array(bytes[8..<20]) == transaction else { return false }
+        let size = Int(bytes[2]) * 256 + Int(bytes[3])
+        guard size % 4 == 0, size + 20 == bytes.count else { return false }
+        var offset = 20, mapped = false
+        while offset < bytes.count {
+            guard offset + 4 <= bytes.count else { return false }
+            let type = Int(bytes[offset]) * 256 + Int(bytes[offset+1])
+            let length = Int(bytes[offset+2]) * 256 + Int(bytes[offset+3])
+            offset += 4
+            guard offset + length <= bytes.count else { return false }
+            if type == 0x20 {
+                guard length >= 4, bytes[offset] == 0 else { return false }
+                let family = bytes[offset+1]
+                guard (family == 1 && length == 8) || (family == 2 && length == 20) else { return false }
+                mapped = true
+            }
+            offset += (length + 3) & ~3
+        }
+        return mapped && offset == bytes.count
+    }
+
+    static func check(_ address: String) async -> Bool {
+        guard let (host, port) = server(address) else { return false }
+        return await withCheckedContinuation { continuation in
+            let probe = NXSTUNProbe()
+            probe.queue.async {
+                probe.completion = { continuation.resume(returning: $0) }
+                let connection = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .udp)
+                probe.connection = connection
+                connection.stateUpdateHandler = { state in
+                    switch state {
+                    case .ready:
+                        probe.receive()
+                        probe.send()
+                        for delay in [1.0, 2.5] {
+                            probe.queue.asyncAfter(deadline: .now() + delay) { probe.send() }
+                        }
+                    case .failed: probe.finish(false)
+                    default: break
+                    }
+                }
+                probe.queue.asyncAfter(deadline: .now() + 5) { probe.finish(false) }
+                connection.start(queue: probe.queue)
+            }
+        }
+    }
+
+    private func send() {
+        guard !finished else { return }
+        let request = Data([0, 1, 0, 0, 0x21, 0x12, 0xa4, 0x42] + transaction)
+        connection?.send(content: request, completion: .contentProcessed { [self] error in
+            if error != nil { finish(false) }
+        })
+    }
+    private func receive() {
+        connection?.receiveMessage { [self] data, _, _, error in
+            guard !finished else { return }
+            if let data, Self.validResponse(data, transaction: transaction) { finish(true) }
+            else if error != nil { finish(false) }
+            else { receive() }
+        }
+    }
+    private func finish(_ result: Bool) {
+        guard !finished else { return }
+        finished = true
+        connection?.stateUpdateHandler = nil
+        connection?.cancel(); connection = nil
+        let callback = completion; completion = nil
+        callback?(result)
     }
 }

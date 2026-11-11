@@ -435,7 +435,7 @@ class AppDelegate: NSObject, UNUserNotificationCenterDelegate {
     /// and before `refreshStaleCoreFeedURLs()` so that sweep doesn't rewrite and
     /// re-sign a bundle that is about to be deleted.
     ///
-    /// Scope is strictly `~/Library/Application Support/OpenEmu/Cores/`. Save
+    /// Scope is strictly `<configured application data folder>/Cores/`. Save
     /// states, battery saves, and the user's own RetroArch install are untouched
     /// — the stub only ever pointed at an external `.dylib` by path.
     ///
@@ -658,7 +658,7 @@ class AppDelegate: NSObject, UNUserNotificationCenterDelegate {
 
     /// One-shot diagnostic written at startup so we can see what core plugins
     /// actually loaded and which systems they advertise. Output goes to
-    /// ~/Library/Logs/OpenEmu/core-inventory.txt — easier to read than the
+    /// <configured application data folder>/Logs/core-inventory.txt — easier to read than the
     /// unified log, and survives across launches. Useful when triaging
     /// "core X doesn't appear in the picker for system Y" reports.
     fileprivate func logCorePluginInventory() {
@@ -806,7 +806,7 @@ class AppDelegate: NSObject, UNUserNotificationCenterDelegate {
             \(affectedCores)
 
             You can keep them now and back up the files in:
-            ~/Library/Application Support/OpenEmu/Save States/
+            \(URL.oeApplicationSupportDirectory.appendingPathComponent("Save States").path)
             before deleting, or remove them immediately.
             """
         alert.alertStyle = .warning
@@ -1303,6 +1303,7 @@ extension AppDelegate: NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NXDataMigration.observePreferences()
         NetworkPlayController.shared.installMenu()
+        NXROMHackController.shared.installMenu()
         // Get the “Customize Touch Bar…” menu to display in the View menu.
         NSApp.isAutomaticCustomizeTouchBarMenuItemEnabled = true
         

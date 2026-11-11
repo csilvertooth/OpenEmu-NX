@@ -177,6 +177,11 @@ final class ROMImporter: NSObject {
     @discardableResult
     func importItem(at url: URL, intoCollectionWith collectionID: NSManagedObjectID? = nil, withCompletionHandler handler: ImportItemCompletionBlock? = nil) -> Bool {
         
+        if ["ips", "bps", "ups"].contains(url.pathExtension.lowercased()) {
+            DispatchQueue.main.async { NXROMHackController.shared.show(patch: url) }
+            return true
+        }
+
         // check operation queue for items that have already import the same url
         let item = operationQueue.operations.first { item in
             if let item = item as? ImportOperation,

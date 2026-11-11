@@ -91,3 +91,8 @@ int main(void) {
 OBJC
 clang -fobjc-arc -framework Foundation -I "$repo/OpenEmu-SDK/OpenEmuBase" "$repo/OpenEmu-SDK/OpenEmuBase/NSUserDefaults+OpenEmuSDK.m" "$scratch/main.m" -o "$inner/Contents/MacOS/check"
 "$inner/Contents/MacOS/check"
+
+# Match the actual auxiliary helper layout, including its embedded Info.plist.
+mkdir -p "$outer/Contents/MacOS"
+clang -fobjc-arc -framework Foundation -I "$repo/OpenEmu-SDK/OpenEmuBase" "$repo/OpenEmu-SDK/OpenEmuBase/NSUserDefaults+OpenEmuSDK.m" "$scratch/main.m" -Wl,-sectcreate,__TEXT,__info_plist,"$inner/Contents/Info.plist" -o "$outer/Contents/MacOS/check"
+"$outer/Contents/MacOS/check"

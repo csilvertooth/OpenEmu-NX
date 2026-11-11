@@ -60,7 +60,7 @@ enum OECredentialKey: String, CaseIterable {
 ///    same app, always the same key — so it never needs to be stored anywhere.
 /// 2. All credentials are kept as a `[String: String]` dictionary, serialised to JSON,
 ///    and encrypted with AES-GCM.
-/// 3. The sealed blob is written to `~/Library/Application Support/OpenEmu/.oe_credentials.<bundle ID>`.
+/// 3. The sealed blob is written to `<configured application data folder>/.oe_credentials.<bundle ID>`.
 ///    Each bundle ID has its own file because each has its own key: release
 ///    (`org.openemu.OpenEmu`) and debug (`org.openemu.OpenEmu.debug`) builds cannot read
 ///    each other's store, and sharing one path let one build overwrite the other's.

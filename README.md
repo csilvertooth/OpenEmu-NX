@@ -1,10 +1,14 @@
-# OpenEmu-NX
+![OpenEmu-NX — Classic games. Together.](docs/assets/openemu-nx-banner.svg)
 
-**Classic games. Together.**
+<p align="center">
+  <a href="https://github.com/csilvertooth/OpenEmu-NX/releases"><img alt="Testing release" src="https://img.shields.io/github/v/release/csilvertooth/OpenEmu-NX?include_prereleases&amp;style=flat-square&amp;color=9567ed" /></a>
+  <img alt="Apple Silicon · macOS 14+ for netplay" src="https://img.shields.io/badge/netplay-Apple%20Silicon%20%C2%B7%20macOS%2014%2B-36aadd?style=flat-square" />
+  <a href="docs/THIRD_PARTY.md"><img alt="Built on open-source projects" src="https://img.shields.io/badge/built%20on-open%20source-64748b?style=flat-square" /></a>
+</p>
 
 OpenEmu-NX is a Mac-first "netplay" like fork of [OpenEmu-Silicon](https://github.com/OpenEmu-Silicon/OpenEmu-Silicon), built on [OpenEmu](https://github.com/OpenEmu/OpenEmu). It keeps the imported game library and native Mac interface while adding shared play.
 
-This is an early testing release. Network Play currently supports **two-player Super Mario Kart NTSC v1.0**, with each player providing their own matching game file. Local emulation retains the upstream core architecture; Network Play uses a separate portable Snes9x runtime. Broader core support does not imply netplay support for those systems.
+This is an early testing release. Network Play currently supports **two-player Super Mario Kart NTSC v1.0**, with matching game files verified by SHA-256. Hosts can optionally share the ROM with an admitted player who confirms ownership; spectators cannot download. Local emulation retains the upstream core architecture; Network Play uses a separate portable Snes9x runtime. Broader core support does not imply netplay support for those systems.
 
 ## Network Play
 
@@ -15,6 +19,14 @@ This is an early testing release. Network Play currently supports **two-player S
 - Rollback simulation with state-hash diagnostics.
 - Direct-first invite connections with authenticated TURN fallback through Valve GameNetworkingSockets.
 - Host multiplayer saves, then reconnect and resume together.
+- Choose a public or custom STUN service and run Network Check for connection guidance.
+- Optional player ROM transfers over the peer connection, verified before normal library import.
+
+## Make your library your own
+
+Apply **IPS, BPS and UPS** patches to a separate copy of a base game. SNES is the primary patching target; NES, Game Boy / Color, GBA, Genesis, Master System and Game Gear support is experimental. Original ROMs and saves stay separate.
+
+Already have a patched ROM? Import it normally, then right-click **Use Base Game Artwork…** to choose a cover and mod name. See [ROM hacks](docs/rom-hacks.md) and [player transfers](docs/rom-transfer.md).
 
 The current network helper requires an Apple Silicon Mac on macOS 14 or newer. ROMs and BIOS files are not included.
 

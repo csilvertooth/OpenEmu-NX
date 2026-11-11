@@ -75,6 +75,8 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		F03000000000000000000011 /* NXROMHackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03000000000000000000001 /* NXROMHackController.swift */; };
+		F03000000000000000000010 /* NXROMPatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03000000000000000000000 /* NXROMPatch.swift */; };
 		E9A000000000000000000001 /* NetworkPlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9A000000000000000000002 /* NetworkPlayController.swift */; };
 		A1B2C3D4E5F6A7B8C9D00040 /* GameCollectionViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D00010 /* GameCollectionViewController.swift */; };
 		A1B2C3D4E5F6A7B8C9D00041 /* GameCollectionViewController+TouchBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D00011 /* GameCollectionViewController+TouchBar.swift */; };
@@ -1150,6 +1152,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F03000000000000000000001 /* NXROMHackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NXROMHackController.swift; sourceTree = "<group>"; };
+		F03000000000000000000000 /* NXROMPatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NXROMPatch.swift; sourceTree = "<group>"; };
 		E9A000000000000000000002 /* NetworkPlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPlayController.swift; sourceTree = "<group>"; };
 		010EDCA21CE628490020417C /* LibraryController.xib */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.xib; path = LibraryController.xib; sourceTree = "<group>"; };
 		012148052537C6D6007F3C84 /* OESystemPluginPostInstall */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = OESystemPluginPostInstall; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -3071,6 +3075,8 @@
 				8FE1BF1D2586C64200A2818A /* OELibraryDatabase+Moving.m */,
 				8F3A184D2860B5D9008A7AC9 /* OELibraryDatabase+Moving.swift */,
 				8F4198AF25B68B7500A7F0BE /* OELibraryDatabase+Maintenance.swift */,
+				F03000000000000000000000 /* NXROMPatch.swift */,
+				F03000000000000000000001 /* NXROMHackController.swift */,
 				83199721142741790068C865 /* ROMImporter.swift */,
 				8356AEF115DA703100AA6B44 /* ImportOperation.swift */,
 				53439A8D13B92C56005C0CC8 /* Items */,
@@ -6505,6 +6511,8 @@
 				836AEA711975BFE100B86935 /* OEGridCell.m in Sources */,
 				05644A4823331EA90033576F /* AboutViewController.swift in Sources */,
 				5A9606E81C0BCD350089B494 /* NSImage+DrawingAdditions.swift in Sources */,
+				F03000000000000000000010 /* NXROMPatch.swift in Sources */,
+				F03000000000000000000011 /* NXROMHackController.swift in Sources */,
 				83199722142741790068C865 /* ROMImporter.swift in Sources */,
 				83507247142F6029005D9033 /* ControllerImageView.swift in Sources */,
 				8FE5DC08270DC0AB00878DFF /* OEDBCollectionFolder.swift in Sources */,

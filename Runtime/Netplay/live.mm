@@ -32,6 +32,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <deque>
+#include <set>
 #include <dlfcn.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
@@ -73,7 +74,7 @@ static NSArray *validatedICEServers(id value){
 static NSDictionary *connectionSettings(NSDictionary *admission,bool allowRelay,bool requireRelay){
  id network=admission[@"network"];
  if(![network isKindOfClass:NSDictionary.class])throw std::runtime_error("Lobby does not provide ICE settings");
- NSArray *stun=validatedICEServers(network[@"stun_servers"]);
+ NSArray *stun=validatedICEServers(config[@"stun_servers"] ?: network[@"stun_servers"]);
  NSMutableDictionary *settings=[@{@"stun_servers":stun,@"turn_servers":@[]} mutableCopy];
  // Normal session polls never authorize relay use. Ignore their TURN fields,
  // including replies from an older lobby, and use only the explicit grant.
@@ -214,7 +215,7 @@ static NSBitmapImageRep *bitmap(const Bytes &pixels,unsigned w,unsigned h){
  auto *destination=b.bitmapData;
  for(unsigned i=0;i<w*h;i++){uint16_t v=pixels[i*2]|(pixels[i*2+1]<<8);destination[i*3]=((v>>11)&31)*255/31;destination[i*3+1]=((v>>5)&63)*255/63;destination[i*3+2]=(v&31)*255/31;}return b;
 }
-struct Peer{bool connected=false,authenticated=false;std::string role,key;Clock::time_point born=Clock::now();};
+struct Peer{bool connected=false,authenticated=false,transferringROM=false;size_t romOffset=0;std::string role,key;Clock::time_point born=Clock::now();};
 static ISteamNetworkingSockets *net=nullptr;static HSteamListenSocket listener=0;static HSteamNetConnection server=0,guest=0;static bool host=false,running=false,failed=false;static std::map<HSteamNetConnection,Peer> peers;
 static void connection(SteamNetConnectionStatusChangedCallback_t *e){
  if(e->m_info.m_eState==k_ESteamNetworkingConnectionState_Connecting && host){if(peers.size()>=20){net->CloseConnection(e->m_hConn,0,"capacity",false);return;}peers[e->m_hConn]={};net->AcceptConnection(e->m_hConn);}
@@ -363,7 +364,7 @@ int runSession(){@autoreleasepool{
    auto utils=SteamNetworkingUtils();
    utils->SetGlobalConfigValuePtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,(void*)&connection);
    utils->SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_P2P_Transport_ICE_Implementation,1);
-   utils->SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_P2P_Transport_ICE_Enable,route=="relay"?1:(route=="direct" || !turn.count)?6:7);
+   utils->SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_P2P_Transport_ICE_Enable,(headless && [config[@"test_network"][@"relay_candidates_only"] boolValue])?1:route=="relay"?1:(route=="direct" || !turn.count)?6:7);
    utils->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_STUN_ServerList,[[stun componentsJoinedByString:@","] UTF8String]);
    utils->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_TURN_ServerList,route=="direct"?"" : [[turn componentsJoinedByString:@","] UTF8String]);
    if(turn.count && route!="direct"){
@@ -398,6 +399,7 @@ int runSession(){@autoreleasepool{
   auto finished=[&](){return !useRollback || watcher || (rollback.confirmed()>=maxFrames && inputTransport.drained());};
   auto telemetryTime=Clock::now();
   auto progress=Clock::now(),pace=progress;unsigned sampled=0;uint16_t sampledMask=0;bool hello=false;auto endWait=Clock::time_point{};auto firstStep=Clock::time_point{},lastStep=firstStep,waitingSince=firstStep;uint64_t coreNS=0,maxCoreNS=0,networkWaitNS=0;unsigned pacingResets=0;
+  std::set<std::string> romDownloads;
   preparationStarted=Clock::now();
   while(!closeRequested()){@autoreleasepool{
    auto now=Clock::now();if(maxFrames && completed>=maxFrames && (watcher || (finished() && localHashes.empty() && remoteHashes.empty())) && (failed || (endWait!=Clock::time_point{} && now-endWait>std::chrono::seconds(1))))break;if(failed)throw std::runtime_error(connectionFailure.empty()?"Player disconnected; game stopped":connectionFailure);
@@ -416,10 +418,31 @@ int runSession(){@autoreleasepool{
    net->RunCallbacks();std::vector<HSteamNetConnection> connections;for(auto &[c,p]:peers)connections.push_back(c);
    for(auto c:connections){auto it=peers.find(c);if(it==peers.end())continue;Peer &peer=it->second;
     if(host && peer.authenticated){bool allowed=false;for(NSDictionary *p in admission[@"peers"])if(str(p[@"key"])==peer.key && str(p[@"role"])==peer.role)allowed=true;if(!allowed){if(c==guest)throw std::runtime_error("Player membership expired");net->CloseConnection(c,0,"membership ended",false);peers.erase(c);continue;}}
-    if(!peer.authenticated && now-peer.born>std::chrono::seconds(ice?30:10)){if(!host)throw std::runtime_error("Handshake timed out");net->CloseConnection(c,0,"timeout",false);peers.erase(c);continue;}
+    if(!peer.authenticated && now-peer.born>std::chrono::seconds(peer.transferringROM?180:(ice?30:10))){if(!host)throw std::runtime_error("Handshake timed out");net->CloseConnection(c,0,"timeout",false);peers.erase(c);continue;}
     for(int m=0;m<64;m++){SteamNetworkingMessage_t *msg=nullptr;int count=net->ReceiveMessagesOnConnection(c,&msg,1);if(count<0)break;if(!count)break;Bytes b((uint8_t*)msg->m_pData,(uint8_t*)msg->m_pData+msg->m_cbSize);msg->Release();
      try{
       if(b.empty() || b.size()>300000)throw std::runtime_error("Invalid packet size");unsigned type=b[0];Bytes payload(b.begin()+1,b.end());
+      if(host && (type==20 || type==22)) {
+       if(running || guest || ![config[@"allow_rom_transfer"] isEqual:@YES]) {
+        mustSend(c,24,json(@{@"error":@"The host has not allowed ROM sharing, or gameplay has already started."}));continue;
+       }
+       auto allowedPlayer=[&](const std::string &key){for(NSDictionary *p in admission[@"peers"])if(str(p[@"key"])==key && [p[@"role"] isEqual:@"guest"])return true;return false;};
+       if(type==20){
+        NSDictionary *h=object(payload);if(![h[@"key"] isKindOfClass:NSString.class] || [h[@"key"] length]>256)throw std::runtime_error("Invalid ROM request key");std::string key=str(h[@"key"]);
+        if(peer.authenticated || peer.transferringROM || ![h[@"session"] isEqual:ns(sessionID)] || ![h[@"compatibility"] isEqual:compat] || !allowedPlayer(key) || romDownloads.count(key))throw std::runtime_error("ROM transfer not authorized");
+        if(rom.empty() || rom.size()>SaveJournal::MaxBytes)throw std::runtime_error("ROM transfer size exceeded");
+        romDownloads.insert(key);peer.key=key;peer.transferringROM=true;
+        mustSend(c,21,json(@{@"key":ns(hostKey),@"session":ns(sessionID),@"sha256":compat[@"rom_sha256"],@"bytes":@(rom.size())}));
+       }else{
+        if(!peer.transferringROM || !allowedPlayer(peer.key))throw std::runtime_error("Player no longer admitted");
+        Reader request{payload};size_t offset=request.get(4);request.end();
+        if(offset!=peer.romOffset || offset>=rom.size())throw std::runtime_error("Invalid ROM chunk request");
+        size_t length=std::min(SaveTransfer::chunkSize(),rom.size()-offset);
+        Bytes chunk;append(chunk,offset,4);chunk.insert(chunk.end(),rom.begin()+offset,rom.begin()+offset+length);mustSend(c,23,chunk);peer.romOffset+=length;
+       }
+       continue;
+      }
+      if(peer.transferringROM)throw std::runtime_error("ROM transfer must finish before gameplay reconnects");
       if(type==1 && host && !peer.authenticated){NSDictionary *h=object(payload);if(![h[@"stream_version"] isEqual:@8] || ![h[@"session"] isEqual:ns(sessionID)] || ![h[@"compatibility"] isEqual:compat])throw std::runtime_error("Incompatible peer");std::string key=str(h[@"key"]),claimed=str(h[@"role"]);if(claimed=="guest" && ![h[@"netcode"] isEqual:useRollback?@"rollback-v3":@"delay-v2"])throw std::runtime_error("Player netcode differs; update both Macs");bool allowed=false;for(NSDictionary *p in admission[@"peers"])if(str(p[@"key"])==key && str(p[@"role"])==claimed)allowed=true;
        if(!allowed || (claimed!="guest" && claimed!="spectator"))throw std::runtime_error("Unadmitted peer");for(auto &[other,p]:peers)if(other!=c && p.authenticated && p.key==key)throw std::runtime_error("Duplicate peer");
        if(claimed=="guest" && (guest || running))throw std::runtime_error("Player slot occupied");peer.key=key;peer.role=claimed;peer.authenticated=true;if(claimed=="guest")guest=c;
@@ -533,6 +556,73 @@ int runSession(){@autoreleasepool{
  }catch(const std::exception &e){encoder.reset();signalWorker.reset();lobbyWorker.reset();if(launched){try{api(@"stop",@"POST",@{});}catch(...) {}}if(core)emu_destroy(core);if(net)GameNetworkingSockets_Kill();std::string shutdownSaveError;{std::lock_guard<std::mutex> lock(saveStatusMutex);shutdownSaveError=saveError;}auto b=json(@{@"error":ns(e.what()),@"frames":@(completed),@"save_completed_frame":@(saveCompletedFrame.load()),@"save_error":ns(shutdownSaveError)});if([config[@"audio_report"] isKindOfClass:NSString.class]){std::ofstream diagnostic(str(config[@"audio_report"])+".session.json");diagnostic.write((char*)b.data(),b.size());}fwrite(b.data(),1,b.size(),stdout);puts("");if(!reportPath.empty()){std::ofstream f(reportPath);f.write((char*)b.data(),b.size());}return 1;}
 }}
 
+// Download before normal gameplay admission. The frontend supplies a new local
+// destination, never a peer-controlled path. No emulator sees unverified bytes.
+static int receiveROM(){@autoreleasepool{
+ std::unique_ptr<SignalWorker> signalsWorker;std::unique_ptr<LobbyWorker> lobby;
+ try {
+  validateLobbyOrigin();
+  if(![config[@"receive_rom"] isKindOfClass:NSString.class] || ![config[@"expected_rom_sha256"] isKindOfClass:NSString.class])throw std::runtime_error("Missing ROM transfer settings");
+  const auto expected=saveDigestFromHex(str(config[@"expected_rom_sha256"]));
+  NSURLSessionConfiguration *hc=NSURLSessionConfiguration.ephemeralSessionConfiguration;hc.URLCache=nil;hc.HTTPCookieStorage=nil;hc.URLCredentialStorage=nil;
+  http=[NSURLSession sessionWithConfiguration:hc delegate:[NoRedirect new] delegateQueue:nil];
+  NSDictionary *admission=api(@"session",@"GET");
+  if(![admission[@"room"][@"role"] isEqual:@"guest"])throw std::runtime_error("Only Player 2 may request a ROM; spectators cannot download");
+  NSDictionary *compat=admission[@"room"][@"compatibility"];
+  if(![compat[@"rom_sha256"] isEqual:config[@"expected_rom_sha256"]])throw std::runtime_error("Room ROM SHA-256 changed");
+  const auto deadline=Clock::now()+std::chrono::seconds(180);auto heartbeat=Clock::now();
+  while(![admission[@"session"] isKindOfClass:NSDictionary.class]){
+   if(closeRequested() || Clock::now()>deadline)throw std::runtime_error("Timed out waiting for host to Start Game");
+   if(Clock::now()>=heartbeat){api(@"heartbeat",@"POST",@{});heartbeat=Clock::now()+std::chrono::seconds(15);}
+   std::this_thread::sleep_for(std::chrono::seconds(1));admission=api(@"session",@"GET");
+  }
+  NSDictionary *session=admission[@"session"];
+  if(![session[@"transport"] isEqual:@"ice"])throw std::runtime_error("ROM transfer requires Automatic network play");
+  std::string sessionID=str(session[@"id"]);bool relay=[session[@"route"] isEqual:@"relay"];
+  NSDictionary *settings=connectionSettings(admission,true,relay);
+  SteamNetworkingIdentity identity;identity.Clear();if(!identity.ParseString([admission[@"identity"] UTF8String]))throw std::runtime_error("Invalid player identity");
+  SteamDatagramErrMsg error;if(!GameNetworkingSockets_Init(&identity,error))throw std::runtime_error(error);net=SteamNetworkingSockets();
+  auto utils=SteamNetworkingUtils();utils->SetGlobalConfigValuePtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,(void*)&connection);
+  utils->SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_IP_AllowWithoutAuth,2);
+  utils->SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_P2P_Transport_ICE_Implementation,1);
+  NSArray *turn=settings[@"turn_servers"];
+  utils->SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_P2P_Transport_ICE_Enable,relay?1:(turn.count?7:6));
+  utils->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_STUN_ServerList,[[settings[@"stun_servers"] componentsJoinedByString:@","] UTF8String]);
+  utils->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_TURN_ServerList,[[turn componentsJoinedByString:@","] UTF8String]);
+  if(turn.count){NSMutableArray *users=[NSMutableArray array],*passwords=[NSMutableArray array];for(NSUInteger i=0;i<turn.count;i++){[users addObject:settings[@"turn_username"]];[passwords addObject:settings[@"turn_password"]];}
+   utils->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_TURN_UserList,[[users componentsJoinedByString:@","] UTF8String]);utils->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_TURN_PassList,[[passwords componentsJoinedByString:@","] UTF8String]);}
+  auto mailbox=std::make_shared<SignalMailbox>();signalsWorker=std::make_unique<SignalWorker>(mailbox,sessionID,[admission[@"signaling_request_ids"] isEqual:@YES]);lobby=std::make_unique<LobbyWorker>(admission);
+  SteamNetworkingIdentity remote;remote.Clear();if(!remote.ParseString([admission[@"host_identity"] UTF8String]))throw std::runtime_error("Invalid host identity");
+  server=net->ConnectP2PCustomSignaling(new LobbySignaler(mailbox,str(admission[@"host_identity"])),&remote,0,0,nullptr);if(!server)throw std::runtime_error("Cannot connect to host for ROM transfer");peers[server]={};
+  bool requested=false,offered=false;SaveTransfer transfer;
+  while(!transfer.complete()){@autoreleasepool{
+   if(closeRequested() || Clock::now()>deadline)throw std::runtime_error("ROM transfer cancelled or timed out");
+   admission=lobby->read();if(![admission[@"session"] isKindOfClass:NSDictionary.class] || ![admission[@"session"][@"id"] isEqual:ns(sessionID)])throw std::runtime_error("Host ended the session");
+   signalsWorker->poll(net,false);net->RunCallbacks();if(failed)throw std::runtime_error("ROM transfer connection ended; check host sharing and build version");
+   if(!requested && peers.count(server) && peers[server].connected){mustSend(server,20,json(@{@"key":admission[@"play_key"],@"session":ns(sessionID),@"compatibility":compat}));requested=true;}
+   SteamNetworkingMessage_t *message=nullptr;
+   if(net->ReceiveMessagesOnConnection(server,&message,1)>0){Bytes b((uint8_t*)message->m_pData,(uint8_t*)message->m_pData+message->m_cbSize);message->Release();
+    if(b.empty() || b.size()>65536)throw std::runtime_error("Invalid ROM message");unsigned type=b[0];Bytes payload(b.begin()+1,b.end());
+    if(type==24){id reason=object(payload)[@"error"];throw std::runtime_error([reason isKindOfClass:NSString.class] && [reason length]<=512?str(reason):"Host refused ROM transfer");}
+    if(type==21 && !offered){NSDictionary *offer=object(payload);if(![offer[@"bytes"] isKindOfClass:NSNumber.class])throw std::runtime_error("Invalid ROM byte count");auto count=[offer[@"bytes"] unsignedLongLongValue];
+     if(![offer[@"key"] isEqual:admission[@"host_key"]] || ![offer[@"session"] isEqual:ns(sessionID)] || ![offer[@"sha256"] isEqual:config[@"expected_rom_sha256"]] || !count || count>SaveJournal::MaxBytes)throw std::runtime_error("Invalid ROM offer or SHA-256 mismatch");
+     transfer.begin(size_t(count),expected);offered=true;
+    }else if(type==23 && offered){Reader reader{payload};size_t offset=reader.get(4);if(offset!=transfer.received())throw std::runtime_error("Unexpected ROM chunk offset");transfer.put(offset,Bytes(payload.begin()+4,payload.end()));}
+    else throw std::runtime_error("Unexpected ROM transfer message");
+    if(!transfer.complete()){Bytes request;append(request,transfer.received(),4);mustSend(server,22,request);}
+   }
+   std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }}
+  const auto &bytes=transfer.finish(); // mandatory full SHA-256 before any disk write
+  NSError *writeError=nil;NSData *data=[NSData dataWithBytes:bytes.data() length:bytes.size()];
+  if(![data writeToFile:config[@"receive_rom"] options:NSDataWritingWithoutOverwriting error:&writeError])throw std::runtime_error("Cannot write received ROM without replacing an existing file");
+  SteamNetConnectionInfo_t info{};net->GetConnectionInfo(server,&info);
+  auto output=json(@{@"result":@"PASS",@"bytes":@(bytes.size()),@"sha256":config[@"expected_rom_sha256"],@"route":(info.m_nFlags&k_nSteamNetworkConnectionInfoFlags_Relayed)?@"relay":@"direct"});
+  net->CloseConnection(server,0,"ROM received",true);signalsWorker.reset();lobby.reset();GameNetworkingSockets_Kill();net=nullptr;
+  fwrite(output.data(),1,output.size(),stdout);puts("");return 0;
+ }catch(const std::exception &e){signalsWorker.reset();lobby.reset();if(net){GameNetworkingSockets_Kill();net=nullptr;}auto output=json(@{@"error":ns(e.what())});fwrite(output.data(),1,output.size(),stdout);puts("");return 1;}
+}}
+
 // AppKit and controller sampling stay on the main thread. Audio pulls from
 // its ring on the device callback, independently of window event tracking.
 // The entire core lifetime (including creation and destruction) stays on its
@@ -542,6 +632,7 @@ int main(){@autoreleasepool{
   struct sigaction termination{};termination.sa_handler=requestTermination;sigemptyset(&termination.sa_mask);
   if(sigaction(SIGTERM,&termination,nullptr) || sigaction(SIGINT,&termination,nullptr))throw std::runtime_error("Cannot install clean shutdown handlers");
   std::string line;std::getline(std::cin,line);if(line.size()>16384)throw std::runtime_error("Invalid launch configuration");config=object(Bytes(line.begin(),line.end()));
+  if(config[@"receive_rom"])return receiveROM();
   if([config[@"headless"] boolValue])return runSession();
   [NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];[NSApp finishLaunching];
   NSWindow *window=[[GameWindow alloc]initWithContentRect:NSMakeRect(0,0,768,672) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];window.releasedWhenClosed=NO;window.title=@"Network Play — Connecting";

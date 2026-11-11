@@ -128,7 +128,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.4</string>
+	<string>0.1.5</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -141,7 +141,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>27</string>
+	<string>32</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
 	<key>LSMinimumSystemVersion</key>
@@ -167,8 +167,6 @@
 	<true/>
 	<key>OEBuildVersion</key>
 	<string></string>
-	<key>OEBundlePath</key>
-	<string>~/Library/Application Support/OpenEmu/Cores/</string>
 	<key>OECoreListURL</key>
 	<string>https://raw.githubusercontent.com/OpenEmu-Silicon/OpenEmu-Silicon/main/oecores.xml</string>
 	<key>OELongBuildVersion</key>

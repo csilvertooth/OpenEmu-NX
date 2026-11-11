@@ -37,7 +37,7 @@ extension NSXPCListener {
     
     static func makeHelperListener(serviceName name: String) throws -> NSXPCListener {
         guard let identifier = Self.helperIdentifierFromArguments else {
-            fatalError("Expected to find helper identifier")
+            throw NSXPCConnection.BrokerError(failureReason: "Missing helper identifier")
         }
         
         os_log(.info, log: .helper, "Registering helper listener endpoint with broker. { id = %{public}@ }", identifier)
@@ -56,7 +56,7 @@ extension NSXPCListener {
         
         guard let mm = mm else {
             os_log(.error, log: .helper, "Unexpected nil for OEXPCMatchMaking proxy.")
-            fatalError("Unexpected nil for OEXPCMatchMaking proxy.")
+            throw NSXPCConnection.BrokerError(failureReason: "Broker proxy unavailable")
         }
         
         let sem = DispatchSemaphore(value: 0)
@@ -70,11 +70,12 @@ extension NSXPCListener {
         #if XPC_WAIT_FOREVER
         sem.wait()
         #else
-        if sem.wait(timeout: .now() + .seconds(2)) == .timedOut {
+        if sem.wait(timeout: .now() + .seconds(10)) == .timedOut {
             // mediation of connection between host and helper via broker timed out
             os_log(.error, log: .helper, "Timeout waiting for host connection.")
             listener.invalidate()
-            fatalError("Timeout waiting for host connection.")
+            cn.invalidate()
+            throw NSXPCConnection.BrokerError(failureReason: "Timeout waiting for host connection")
         }
         #endif
         

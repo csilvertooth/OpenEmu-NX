@@ -23,6 +23,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import Foundation
+import OpenEmuBase
 
 class Download: NSObject {
     
@@ -122,7 +123,7 @@ extension Download: URLSessionDownloadDelegate {
         DLog("Download (\(session.sessionDescription ?? "")) did finish downloading temporary data.")
         
         let temporaryDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("org.openemu.OpenEmu", isDirectory: true)
+            .appendingPathComponent(OEApplicationSupportFolderName(), isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let destination = temporaryDirectory.appendingPathComponent(url.lastPathComponent)
         

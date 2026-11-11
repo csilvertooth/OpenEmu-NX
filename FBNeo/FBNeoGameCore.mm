@@ -104,7 +104,7 @@ static uint32_t fbneo_rc_read_memory(uint32_t address, uint8_t *buffer, uint32_t
 #pragma mark - Lifecycle
 
 // Mirrors the MAME core's setBasePath: everything lives under
-// ~/Library/Application Support/OpenEmu/FBNeo/<subfolder>.
+// <configured application data folder>/FBNeo/<subfolder>.
 - (void)setupSupportPaths
 {
     NSString *base = self.supportDirectoryPath;

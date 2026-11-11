@@ -479,6 +479,8 @@ extension GameCollectionViewController: CollectionViewExtendedDelegate, NSMenuIt
             menu.addItem(withTitle: NSLocalizedString("Add Cover Art from File…", comment: ""),
                          action: #selector(addCoverArtFromFile(_:)),
                          keyEquivalent: "")
+            menu.addItem(withTitle: "Use Base Game Artwork…",
+                         action: #selector(useBaseGameArtwork(_:)), keyEquivalent: "")
             menu.addItem(withTitle: NSLocalizedString("Import Artwork from Folder…", comment: ""),
                          action: #selector(importArtworkFromFolder(_:)),
                          keyEquivalent: "")
@@ -851,6 +853,12 @@ extension GameCollectionViewController: CollectionViewExtendedDelegate, NSMenuIt
         reloadData()
     }
     
+    @objc func useBaseGameArtwork(_ sender: Any?) {
+        guard selectedGames.count == 1, let game = selectedGames.first else { return }
+        NXBaseArtworkChooser().run(for: game)
+        reloadData()
+    }
+
     @objc func addCoverArtFromFile(_ sender: Any?) {
         let openPanel = NSOpenPanel()
         openPanel.allowsMultipleSelection = false

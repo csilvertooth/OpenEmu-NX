@@ -82,7 +82,7 @@ enum OECoreMigration {
             alert.informativeText = """
                 OpenEmu-Silicon found \(movedCores.count == 1 ? "an Intel-only core" : "\(movedCores.count) Intel-only cores") \
                 that cannot run on Apple Silicon and moved \(movedCores.count == 1 ? "it" : "them") to \
-                ~/Library/Application Support/OpenEmu/Cores/Legacy/.
+                \(legacy.path).
 
                 Moved: \(movedCores.joined(separator: ", "))
 

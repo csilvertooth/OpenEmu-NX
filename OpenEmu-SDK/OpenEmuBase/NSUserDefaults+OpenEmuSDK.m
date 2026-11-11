@@ -25,23 +25,38 @@
 #import "NSUserDefaults+OpenEmuSDK.h"
 
 
-NSBundle *OEHostApplicationBundle(void)
+// Auxiliary executables can have an embedded Info.plist. NSBundle may cache
+// that dictionary under the containing application's URL. Read the host's real
+// plist directly so the core process and GUI always use the same configuration.
+static NSURL *OEHostConfigurationURL(void)
 {
-    // The broker and Network Play helpers are nested in the host app. Walk out
-    // to its configuration rather than accidentally choosing a helper's domain.
-    NSURL *url = NSBundle.mainBundle.bundleURL;
-    for (NSUInteger depth = 0; depth < 12 && url.path.length > 1; ++depth) {
-        NSBundle *bundle = [NSBundle bundleWithURL:url];
-        if ([bundle objectForInfoDictionaryKey:@"OEApplicationSupportFolder"] != nil)
-            return bundle;
+    NSURL *url = NSBundle.mainBundle.executableURL ?: NSBundle.mainBundle.bundleURL;
+    for (NSUInteger depth = 0; depth < 24 && url.path.length > 1; ++depth) {
+        if ([url.pathExtension isEqualToString:@"app"]) {
+            NSURL *infoURL = [url URLByAppendingPathComponent:@"Contents/Info.plist"];
+            NSDictionary *info = [NSDictionary dictionaryWithContentsOfURL:infoURL];
+            if (info[@"OEApplicationSupportFolder"] != nil) return infoURL;
+        }
         url = url.URLByDeletingLastPathComponent;
     }
-    return NSBundle.mainBundle;
+    return nil;
+}
+
+static NSDictionary *OEHostConfiguration(void)
+{
+    NSURL *url = OEHostConfigurationURL();
+    return url ? [NSDictionary dictionaryWithContentsOfURL:url] : NSBundle.mainBundle.infoDictionary;
+}
+
+NSBundle *OEHostApplicationBundle(void)
+{
+    NSURL *url = OEHostConfigurationURL();
+    return url ? [NSBundle bundleWithURL:url.URLByDeletingLastPathComponent.URLByDeletingLastPathComponent] : NSBundle.mainBundle;
 }
 
 NSString *OEApplicationSupportFolderName(void)
 {
-    id value = [OEHostApplicationBundle() objectForInfoDictionaryKey:@"OEApplicationSupportFolder"];
+    id value = OEHostConfiguration()[@"OEApplicationSupportFolder"];
     if ([value isKindOfClass:NSString.class] && [value length] > 0 &&
         ![value isEqualToString:@"."] && ![value isEqualToString:@".."] &&
         [value rangeOfString:@"/"].location == NSNotFound)
@@ -58,7 +73,7 @@ NSURL *OEApplicationSupportDirectoryURL(void)
 
 NSString *OEApplicationPreferencesDomain(void)
 {
-    return OEHostApplicationBundle().bundleIdentifier ?: @"org.openemu.OpenEmu";
+    return OEHostConfiguration()[@"CFBundleIdentifier"] ?: @"org.openemu.OpenEmu";
 }
 
 @implementation NSUserDefaults (OpenEmuSDK)

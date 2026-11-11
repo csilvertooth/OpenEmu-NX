@@ -470,7 +470,7 @@ final class PrefDebugController: NSViewController {
                         if let location = location {
                             
                             let tmpDir = FileManager.default.temporaryDirectory
-                                .appendingPathComponent("org.openemu.OpenEmu", isDirectory: true)
+                                .appendingPathComponent(OEApplicationSupportFolderName(), isDirectory: true)
                                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
                             
                             ArchiveHelper.decompressFileInArchive(at: location, toDirectory: tmpDir)

@@ -43,7 +43,7 @@ public class OECorePlugin: OEPlugin {
         for plugin in all {
             let id = plugin.bundleIdentifier
             if let existing = seen[id] {
-                os_log(.error, "OECorePlugin: CFBundleIdentifier collision — '%{public}@' is claimed by both '%{public}@' and '%{public}@'. The first one found will be used; remove the duplicate from ~/Library/Application Support/OpenEmu/Cores/ to restore correct behaviour.",
+                os_log(.error, "OECorePlugin: CFBundleIdentifier collision — '%{public}@' is claimed by both '%{public}@' and '%{public}@'. The first one found will be used; remove the duplicate from the configured application data folder’s Cores directory to restore correct behaviour.",
                        id, existing.url.lastPathComponent, plugin.url.lastPathComponent)
             } else {
                 seen[id] = plugin

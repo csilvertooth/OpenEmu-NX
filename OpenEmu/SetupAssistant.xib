@@ -77,7 +77,7 @@
                             <subviews>
                                 <textField verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="315">
                                     <rect key="frame" x="17" y="220" width="150" height="16"/>
-                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Welcome to OpenEmu Silicon" id="316">
+                                    <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Welcome to OpenEmu-NX" id="316">
                                         <font key="font" metaFont="systemBold"/>
                                         <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
                                         <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
@@ -338,14 +338,16 @@ This setup will install the system cores you need to start playing. Cores are mo
                                     <rect key="frame" x="17" y="156" width="383" height="56"/>
                                     <textFieldCell key="cell" controlSize="small" sendsActionOnEndEditing="YES" state="on" id="402">
                                         <font key="font" metaFont="smallSystem"/>
-                                        <string key="title">Classic games. Together.
+                                        <string key="title">Classic games. Together. — 0.1.5
 
-• Network Play — host a game or join friends with an invite code.
-• Responsive controls — rollback netplay with no added input delay.
-• Spectators — let friends watch, with optional room passwords.
-• Multiplayer saves — leave a game and resume together later.
+• ROM hacks — apply IPS, BPS and UPS patches safely.
+• Mod artwork — reuse a base game’s cover with a custom label.
+• Network Check — STUN options and connection guidance.
+• Player downloads — optional, hash-verified ROM sharing.
+• Helper launch fixes and a wider network results window.
 
-This preview supports Super Mario Kart NTSC v1.0. Each player needs their own matching game.</string>
+Network Play supports Super Mario Kart NTSC v1.0.
+ROMs and BIOS files are not included.</string>
                                         <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
                                         <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
                                     </textFieldCell>

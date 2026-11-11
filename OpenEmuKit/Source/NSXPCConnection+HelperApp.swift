@@ -73,50 +73,39 @@ extension NSXPCConnection {
             }
         }
         
-        /// 2. Launch a connection to the broker
-        let cn = NSXPCConnection(serviceName: name)
-        cn.invalidationHandler = {
-            os_log(.error, log: .helper, "Broker connection was unexpectedely invalidated.")
-        }
-        
-        cn.remoteObjectInterface = .init(with: OEXPCMatchMaking.self)
-        cn.resume()
-        
-        let mm = cn.remoteObjectProxyWithErrorHandler { error in
-            os_log(.error, log: .helper, "Error waiting for reply from OEXPCMatchMaking. { error = %{public}@ }", error.localizedDescription)
-        } as? OEXPCMatchMaking
-        
-        guard let mm = mm else {
-            os_log(.error, log: .helper, "Unexpected nil for OEXPCMatchMaking proxy.")
-            throw BrokerError(failureReason: NSLocalizedString("OEXPCMatchMaking proxy was nil", comment: ""))
-        }
-        
-        let sem = DispatchSemaphore(value: 0)
+        // The broker declares ServiceType=User. A serviceName connection looks
+        // in the host's per-process bundle namespace and can fail with error 3,
+        // while the auxiliary helper has already started the user-scoped broker.
+        // Connect in that shared scope and retry lookup while it starts.
+        let deadline = DispatchTime.now() + .seconds(8)
         var endpoint: NSXPCListenerEndpoint?
-        mm.retrieveListenerEndpoint(forIdentifier: identifier) { ep in
-            endpoint = ep
-            sem.signal()
+        var lastFailure = "Timeout waiting for connection from helper app"
+        while task.isRunning && DispatchTime.now() < deadline {
+            let attempt = HelperBrokerAttempt()
+            let cn = NSXPCConnection(machServiceName: name)
+            cn.remoteObjectInterface = .init(with: OEXPCMatchMaking.self)
+            cn.resume()
+            let mm = cn.remoteObjectProxyWithErrorHandler { error in
+                attempt.finish(endpoint: nil, failure: error.localizedDescription)
+            } as? OEXPCMatchMaking
+            if let mm {
+                mm.retrieveListenerEndpoint(forIdentifier: identifier) { endpoint in
+                    attempt.finish(endpoint: endpoint, failure: nil)
+                }
+            } else {
+                attempt.finish(endpoint: nil, failure: "Broker proxy unavailable")
+            }
+            _ = attempt.ready.wait(timeout: deadline)
+            let result = attempt.result
+            cn.invalidate()
+            if let value = result.0 { endpoint = value; break }
+            if let failure = result.1 { lastFailure = failure }
+            // Only connection lookup errors return immediately; a pending
+            // handshake consumes the deadline and must not be duplicated.
+            if DispatchTime.now() < deadline { Thread.sleep(forTimeInterval: 0.05) }
         }
-        
-#if XPC_WAIT_FOREVER
-        sem.wait()
-#else
-        if sem.wait(timeout: .now() + .seconds(10)) == .timedOut {
-            // mediation of connection between host and helper via broker timed out
-            os_log(.error, log: .helper, "Timeout waiting for listener endpoint from broker.")
-            
-            throw BrokerError(failureReason: NSLocalizedString("Timeout waiting for connection from helper app", comment: ""))
-        }
-        
-#endif
-        
-        cn.invalidationHandler = nil
-        cn.invalidate()
-        
-        guard let endpoint = endpoint else {
-            throw BrokerError(failureReason: NSLocalizedString("Broker endpoint is nil", comment: ""))
-        }
-        
+        guard let endpoint else { throw BrokerError(failureReason: lastFailure) }
+
         guard task.isRunning else {
             throw BrokerError(failureReason: NSLocalizedString("Helper unexpectedly terminated", comment: ""))
         }
@@ -135,5 +124,24 @@ extension NSXPCConnection {
         
         success = true
         return newCn
+    }
+}
+
+/// XPC callbacks can arrive after a timeout; protect the attempt's reply state.
+private final class HelperBrokerAttempt: @unchecked Sendable {
+    let ready = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var finished = false
+    private var endpoint: NSXPCListenerEndpoint?
+    private var failure: String?
+    func finish(endpoint: NSXPCListenerEndpoint?, failure: String?) {
+        lock.lock()
+        guard !finished else { lock.unlock(); return }
+        finished = true; self.endpoint = endpoint; self.failure = failure
+        lock.unlock(); ready.signal()
+    }
+    var result: (NSXPCListenerEndpoint?, String?) {
+        lock.lock(); defer { lock.unlock() }
+        return (endpoint, failure)
     }
 }

@@ -45,11 +45,11 @@ extension NSNotification.Name {
     ///   - bundle: The main bundle used to locate shaders.
     ///   - name: The name of the path used to read and write user-specified shaders,
     ///     from within the application support directory. A `nil`
-    ///     value will use the `kCFBundleNameKey` from the main bundle; otherwise, `OpenEmuKit` will be used.
+    ///     value uses the host application’s configured support folder.
     @objc public init(store: UserDefaults, bundle: Bundle = .main, userPathName name: String? = nil) {
         self.store          = store
         self.bundle         = bundle
-        self.userPathName   = name ?? bundle.infoDictionary?[kCFBundleNameKey as String] as? String ?? "OpenEmuKit"
+        self.userPathName   = name ?? OEApplicationSupportFolderName()
         super.init()
         
         self.systemShaders  = loadSystemShaders()

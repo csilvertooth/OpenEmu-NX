@@ -503,6 +503,11 @@ final class ImportOperation: Operation, NSCopying, @unchecked Sendable {
                 performImportStepDetermineSystem()
                 if shouldExit { return }
                 
+                if systemIdentifiers.contains("openemu.system.snes"),
+                   let bytes = try? NXROMPatch.read(extractedFileURL ?? url) {
+                    NXROMHackController.warnAboutSNESHeader(bytes, name: sourceURL.lastPathComponent)
+                }
+
                 performImportStepOrganize()
                 if shouldExit { return }
                 

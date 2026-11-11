@@ -37,6 +37,7 @@ private extension NSUserInterfaceItemIdentifier {
 final class MainWindowController: NSWindowController {
     
     private var gameDocument: OEGameDocument?
+    private var showingNXReleaseNotes = false
     private var shouldExitFullScreenWhenGameFinishes = false
     private var shouldUndockGameWindowOnFullScreenExit = false
     private var resumePlayingAfterFullScreenTransition = false
@@ -182,6 +183,8 @@ final class MainWindowController: NSWindowController {
             let setupAssistant = SetupAssistant()
             setupAssistant.completionBlock = {
                 self.currentContentController = self.libraryController
+                // Fresh installs already saw these notes on the setup's final page.
+                UserDefaults.standard.set(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String, forKey: "nx.whatsNew.seenVersion")
             }
             
             window?.center()
@@ -451,6 +454,46 @@ extension MainWindowController: NSWindowDelegate {
     func windowDidBecomeKey(_ notification: Notification) {
         currentContentController?.viewWillAppear()
         currentContentController?.viewDidAppear()
+        showNXReleaseNotesIfNeeded()
+    }
+
+    private func showNXReleaseNotesIfNeeded() {
+        guard !showingNXReleaseNotes, gameDocument == nil,
+              UserDefaults.standard.bool(forKey: SetupAssistant.hasFinishedKey),
+              let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+              UserDefaults.standard.string(forKey: "nx.whatsNew.seenVersion") != version,
+              let window, window.attachedSheet == nil else { return }
+        showingNXReleaseNotes = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard window.isVisible, window.attachedSheet == nil, self.gameDocument == nil else { self.showingNXReleaseNotes = false; return }
+            let alert = NSAlert()
+            alert.messageText = "What’s New in OpenEmu-NX \(version)"
+            let content = NSTextField(wrappingLabelWithString: """
+            ROM hacks, with their own identity
+            Apply IPS, BPS and UPS patches without replacing your original game or saves. Other supported systems are experimental. Use Base Game Artwork adds a cover and mod-name overlay to already patched games.
+
+            Easier connections with friends
+            Choose a STUN service and use Check Network for connection guidance. Automatic connections prefer direct play and can fall back to a relay.
+
+            Optional player ROM downloads
+            Hosts can allow Player 2 to request the matching game. Players confirm ownership; downloads are hash-verified and imported using normal library placement. Spectators cannot download.
+
+            Fixes and polish
+            Corrected helper launch failures and enlarged the Network Check results.
+
+            Network Play remains a testing feature for Super Mario Kart NTSC v1.0 on Apple Silicon and macOS 14 or later. ROMs and BIOS files are not included.
+            """)
+            content.font = .systemFont(ofSize: 13)
+            content.preferredMaxLayoutWidth = 620
+            content.frame = NSRect(x: 0, y: 0, width: 620, height: 340)
+            alert.accessoryView = content
+            alert.addButton(withTitle: "Let’s Play")
+            alert.beginSheetModal(for: window) { [weak self] _ in
+                UserDefaults.standard.set(version, forKey: "nx.whatsNew.seenVersion")
+                self?.showingNXReleaseNotes = false
+            }
+        }
     }
     
     func windowDidBecomeMain(_ notification: Notification) {
