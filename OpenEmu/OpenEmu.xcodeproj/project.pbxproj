@@ -75,6 +75,7 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		F05000000000000000000001 /* NetplayCompatibility.json in Resources */ = {isa = PBXBuildFile; fileRef = F05000000000000000000002; };
 		F03000000000000000000011 /* NXROMHackController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03000000000000000000001 /* NXROMHackController.swift */; };
 		F03000000000000000000010 /* NXROMPatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03000000000000000000000 /* NXROMPatch.swift */; };
 		E9A000000000000000000001 /* NetworkPlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9A000000000000000000002 /* NetworkPlayController.swift */; };
@@ -1152,6 +1153,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F05000000000000000000002 /* NetplayCompatibility.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = NetplayCompatibility.json; sourceTree = "<group>"; };
 		F03000000000000000000001 /* NXROMHackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NXROMHackController.swift; sourceTree = "<group>"; };
 		F03000000000000000000000 /* NXROMPatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NXROMPatch.swift; sourceTree = "<group>"; };
 		E9A000000000000000000002 /* NetworkPlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPlayController.swift; sourceTree = "<group>"; };
@@ -3274,6 +3276,7 @@
 				83AAC32514581469005ADD16 /* Controls */,
 				1B47F104142F01E700EBC55B /* SetupAssistant.swift */,
 				8F40EB841C1072B300683055 /* SetupAssistant.xib */,
+				F05000000000000000000002 /* NetplayCompatibility.json */,
 			);
 			name = "Setup Assistant";
 			sourceTree = "<group>";
@@ -5794,6 +5797,7 @@
 				83FE964A196859F800DD8DB9 /* PrefLibraryController.xib in Resources */,
 				8FD905771AA2927100FA7662 /* PrefControlsController.xib in Resources */,
 				83FE966419685F8F00DD8DB9 /* SetupAssistant.xib in Resources */,
+				F05000000000000000000001 /* NetplayCompatibility.json in Resources */,
 				83C748CC196DF34D0090BC91 /* HomebrewViewController.xib in Resources */,
 				556CEBF01BCE173B00F00EAA /* Graphics.xcassets in Resources */,
 				051DDCB923E5E50100325147 /* AvailableLibrariesCollectionViewItem.xib in Resources */,

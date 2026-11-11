@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "games": [
+    {
+      "title": "Super Mario Kart NTSC v1.0",
+      "system": "openemu.system.snes",
+      "rom_sha256": "2ada8919688087be60a6a48cace8f877add60c45d2e5d09e2442faa55be62a49",
+      "runtime_profile": "snes9x-1.63-smk-ntsc-v1-abi1",
+      "app_version": "0.1.5",
+      "status": "tested",
+      "notes": "0.1.5 SNES runtime; expanded runtime requires revalidation",
+      "evidence": "Two-Mac direct, TURN fallback, matching state hashes; earlier manual steering, audio and hotspot checks."
+    },
+    {
+      "title": "Contra III - The Alien Wars",
+      "system": "openemu.system.snes",
+      "rom_sha256": "a93ea87fc835c530b5135c5294433d15eef6dbf656144b387e89ac19cf864996",
+      "runtime_profile": "snes9x-1.63-general-v2-abi1",
+      "app_version": "0.1.6-test.1",
+      "status": "experimental",
+      "notes": "Automated direct and relay synchronization passed; hands-on and save/resume validation pending.",
+      "evidence": "2026-11-11: Mac A and Mac B, 1800 scripted-input frames per route, matching state hashes, approximately 60 fps, no pacing resets."
+    },
+    {
+      "title": "ALttP randomizer eM43XdkRGj",
+      "system": "openemu.system.snes",
+      "rom_sha256": "baf9a84d2cef3d1086a8ae9b2c1f2779b203c6846fabc62e462b14010eec8de1",
+      "runtime_profile": "snes9x-1.63-general-v2-abi1",
+      "app_version": "0.1.6-test.1",
+      "status": "experimental",
+      "notes": "Automated direct and relay synchronization passed; hands-on and save/resume validation pending.",
+      "evidence": "2026-11-11: Mac A and Mac B, 1800 scripted-input frames per route, matching state hashes, approximately 60 fps. Randomizer relay guest recorded one pacing reset."
+    }
+  ]
+}

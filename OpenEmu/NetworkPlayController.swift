@@ -2,6 +2,7 @@
 import Cocoa
 import CoreData
 import Network
+import QuartzCore
 
 private final class NetworkPlayNoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -41,12 +42,29 @@ private struct NetworkPlayProgress: Sendable {
 }
 
 @MainActor
-final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTabViewDelegate {
+final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTabViewDelegate, NSSplitViewDelegate {
     static let shared = NetworkPlayController()
     private let defaults = UserDefaults.standard
     private let prefix = "networkPlay."
     private var panel: NSWindow!
     private let tabs = NSTabView()
+    private let navigation = NSSegmentedControl(labels: ["Host Game", "Join Game", "Relays", "Settings"], trackingMode: .selectOne, target: nil, action: nil)
+    private let joinIdentity = NSTextField(wrappingLabelWithString: "")
+    private let romMatch = NSTextField(wrappingLabelWithString: "")
+    private var verifiedSHA: String?
+    private var downloadButton: NSButton!
+    private var exportButton: NSButton!
+    private var hostOptionsDirty = false
+    private var directoryTask: Task<Void, Never>?
+    private var directoryRefreshing = false
+    private var artworkKey = ""
+    private var statusSplit: NSSplitView?
+    private var statusPaneView: NSView?
+    private var gameHeaderView: NSView?
+    private var actionSurfaceView: NSView?
+    private var saveNoteView: NSView?
+    private var savedStatusHeight: CGFloat = 150
+    private var arrangingStatus = false
     private let name = NSTextField(string: "")
     private let endpoint = NSTextField(string: "")
     private let route = NSPopUpButton()
@@ -61,8 +79,11 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     private let publicRoom = NSButton(checkboxWithTitle: "List this game publicly", target: nil, action: nil)
     private let protectedRoom = NSButton(checkboxWithTitle: "Require a room password", target: nil, action: nil)
     private let password = NSSecureTextField(string: "")
-    private let shareROM = NSButton(checkboxWithTitle: "Allow Player 2 to download this ROM", target: nil, action: nil)
+    private let shareROM = NSButton(checkboxWithTitle: "Allow game downloads for players", target: nil, action: nil)
     private var transferProcess: Process?
+    private let transferProgress = NSProgressIndicator()
+    private var promptedROMRequests = Set<String>()
+    private var connectPulseActive = false
     private let cancelTransferButton = NSButton(title: "Cancel ROM Transfer", target: nil, action: nil)
     private let spectators = NSButton(checkboxWithTitle: "Allow spectators", target: nil, action: nil)
     private let spectatorLimit = NSPopUpButton()
@@ -80,6 +101,9 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     private let browsePassword = NSSecureTextField(string: "")
     private let browseRole = NSPopUpButton()
     private let gameLabel = NSTextField(wrappingLabelWithString: "Choose a game from your OpenEmu library.")
+    private let gameArtwork = NSImageView()
+    private let gameValidation = NSTextField(wrappingLabelWithString: "")
+    private var selectionRevision = UUID()
     private let status = NSTextField(wrappingLabelWithString: "Not connected to a room.")
     private let roomStatus = NSTextField(wrappingLabelWithString: "")
     private var operationButtons: [NSButton] = []
@@ -94,7 +118,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     private var launchButton: NSButton!
     private var resumeGameButton: NSButton!
     private var newGameButton: NSButton!
-    private let resumeLabel = NSTextField(wrappingLabelWithString: "Start a new multiplayer game.")
+    private let resumeLabel = NSTextField(wrappingLabelWithString: "")
     private var resumeURL: URL?
     private var currentAutosaveURL: URL?
     private var gameProcess: Process?
@@ -132,12 +156,8 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             MainActor.assumeIsolated { self?.cancelProgress(); self?.gameProcess?.terminate() }
         }
         let menu = NSMenu(title: "Network Play")
-        for (label, action) in [("Host Game…", #selector(showHost)), ("Join with Invite…", #selector(showJoin)),
-                                ("Browse Games…", #selector(showBrowse)), ("Show Room…", #selector(showRoom)),
-                                ("Copy Invite", #selector(copyInvite)), ("Leave Room", #selector(leaveRoom)),
-                                ("Export Multiplayer Save…", #selector(saveMultiplayerGame)),
-                                ("Relay Directory…", #selector(showRelays)),
-                                ("Network Play Settings…", #selector(showSettings))] {
+        for (label, action) in [("Host…", #selector(showHost)), ("Join…", #selector(showJoin)),
+                                ("Network Settings…", #selector(showSettings))] {
             let item = NSMenuItem(title: label, action: action, keyEquivalent: "")
             item.target = self; menu.addItem(item)
         }
@@ -156,13 +176,17 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     }
     @objc private func showHost() { show(0) }
     @objc private func showJoin() { show(1) }
-    @objc private func showBrowse() { show(2); if !busy { refreshDirectory() } }
-    @objc private func showRelays() { show(3); if !busy { refreshDirectory() } }
-    @objc private func showSettings() { show(4) }
+    @objc private func showBrowse() { show(1); if !busy { refreshDirectory() } }
+    @objc private func showRelays() { show(2); if !busy { refreshDirectory() } }
+    @objc private func showSettings() { show(3) }
     @objc private func showRoom() { show(0) }
     private func show(_ index: Int) {
         if panel == nil { buildWindow() }
+        navigation.selectedSegment = index
         tabs.selectTabViewItem(at: index)
+        refreshArtwork()
+        refreshJoinIdentity()
+        refreshControls()
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -179,28 +203,72 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     }
     private func tab(_ title: String, _ views: [NSView]) {
         let item = NSTabViewItem(identifier: title); item.label = title
-        let holder = NSView(); let stack = NSStackView(views: views)
-        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false; holder.addSubview(stack)
-        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: holder.leadingAnchor, constant: 20),
-                                     stack.topAnchor.constraint(equalTo: holder.topAnchor, constant: 20),
-                                     stack.trailingAnchor.constraint(equalTo: holder.trailingAnchor, constant: -20),
-                                     stack.bottomAnchor.constraint(lessThanOrEqualTo: holder.bottomAnchor, constant: -20)])
-        for view in views where view is NSScrollView {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
+        let holder = NXNetworkDocumentView(); let stack = NSStackView(views: views)
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 16; stack.distribution = .fill
+        holder.translatesAutoresizingMaskIntoConstraints = false
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = holder; holder.addSubview(stack)
+        NSLayoutConstraint.activate([
+            holder.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            stack.leadingAnchor.constraint(equalTo: holder.leadingAnchor, constant: 4),
+            stack.trailingAnchor.constraint(equalTo: holder.trailingAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: holder.topAnchor, constant: 12),
+            stack.bottomAnchor.constraint(equalTo: holder.bottomAnchor, constant: -16)])
+        for view in views {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            let preferredHeight = view.heightAnchor.constraint(equalTo: holder.heightAnchor, constant: -170)
-            preferredHeight.priority = .defaultHigh
-            preferredHeight.isActive = true
+            if view is NSScrollView { view.heightAnchor.constraint(equalToConstant: 220).isActive = true }
         }
-        item.view = holder; tabs.addTabViewItem(item)
+        if title == "Host Game" {
+            // The host form is fixed; reserve its complete height above the divider.
+            stack.removeFromSuperview()
+            let fixed = NSView(); fixed.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: fixed.leadingAnchor, constant: 4),
+                stack.trailingAnchor.constraint(equalTo: fixed.trailingAnchor, constant: -4),
+                stack.topAnchor.constraint(equalTo: fixed.topAnchor, constant: 12),
+                stack.bottomAnchor.constraint(lessThanOrEqualTo: fixed.bottomAnchor, constant: -12)])
+            item.view = fixed
+        } else { item.view = scroll }
+        tabs.addTabViewItem(item)
+    }
+    private func settingsColumn(_ heading: String, _ views: [NSView]) -> NSStackView {
+        let headingLabel = label(heading); headingLabel.font = .boldSystemFont(ofSize: 14)
+        let stack = NSStackView(views: [headingLabel] + views)
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
+        for view in views {
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            view.setContentHuggingPriority(.required, for: .vertical)
+        }
+        stack.setContentHuggingPriority(.required, for: .vertical)
+        stack.distribution = .fill
+        return stack
+    }
+    private func fieldGroup(_ caption: String, _ control: NSView) -> NSStackView {
+        let captionLabel = label(caption)
+        if caption == "Relay Fallback" { captionLabel.font = .boldSystemFont(ofSize: 13) }
+        let stack = NSStackView(views: [captionLabel, control])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 6; stack.distribution = .fill
+        stack.setContentHuggingPriority(.required, for: .vertical)
+        control.setContentHuggingPriority(.required, for: .vertical)
+        control.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        return stack
     }
     private func buildWindow() {
-        panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 840),
+        panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 940, height: 940),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         panel.title = "Network Play"; panel.isReleasedWhenClosed = false
-        panel.contentMinSize = NSSize(width: 760, height: 820)
+        panel.titleVisibility = .hidden
+        if let frameView = panel.contentView?.superview, let close = panel.standardWindowButton(.closeButton) {
+            let centeredTitle = label("Network Play"); centeredTitle.font = .boldSystemFont(ofSize: 13)
+            centeredTitle.translatesAutoresizingMaskIntoConstraints = false; frameView.addSubview(centeredTitle)
+            NSLayoutConstraint.activate([centeredTitle.centerXAnchor.constraint(equalTo: frameView.centerXAnchor),
+                centeredTitle.centerYAnchor.constraint(equalTo: close.centerYAnchor)])
+        }
+        panel.contentMinSize = NSSize(width: 840, height: 700)
         panel.center()
-        name.stringValue = defaults.string(forKey: prefix + "displayName") ?? "Player"
+        name.stringValue = defaults.string(forKey: prefix + "displayName") ?? ""
         endpoint.stringValue = defaults.string(forKey: prefix + "endpoint") ?? "https://netplay.azimuthsystems.net"
         route.addItems(withTitles: ["Automatic (direct or relay)", "Direct only", "Relay only"])
         // Earlier test builds persisted Relay only. New sessions prefer direct ICE.
@@ -216,18 +284,21 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         delay.addItems(withTitles: (1...12).map { "\($0) frames" })
         delay.selectItem(at: min(max(defaults.integer(forKey: prefix + "delay") - 1, 0), 11))
         if defaults.object(forKey: prefix + "delay") == nil { delay.selectItem(at: 2) }
-        title.stringValue = "Super Mario Kart with friends"
+        title.placeholderString = "Enter Room Name Here"
         publicRoom.state = defaults.bool(forKey: prefix + "public") ? .on : .off
         protectedRoom.state = defaults.bool(forKey: prefix + "passwordRequired") ? .on : .off
         spectators.state = defaults.bool(forKey: prefix + "spectators") ? .on : .off
         spectatorLimit.addItems(withTitles: (1...16).map(String.init))
         spectatorLimit.selectItem(at: min(max(defaults.integer(forKey: prefix + "spectatorLimit") - 1, 0), 15))
         if defaults.object(forKey: prefix + "spectatorLimit") == nil { spectatorLimit.selectItem(at: 3) }
-        for control in [protectedRoom, spectators] { control.target = self; control.action = #selector(optionsChanged) }
+        for control in [publicRoom, protectedRoom, spectators, shareROM] { control.target = self; control.action = #selector(optionsChanged) }
         for popup in [joinRole, browseRole] { popup.addItems(withTitles: ["Player", "Spectator"]); popup.setAccessibilityLabel("Join as") }
         for field in [password, joinPassword, browsePassword] { field.placeholderString = "Room password (if required)"; field.setAccessibilityLabel("Room password") }
-        name.setAccessibilityLabel("Display name"); endpoint.setAccessibilityLabel("Lobby server")
+        name.placeholderString = "Enter Player Name Here"
+        name.setAccessibilityLabel("Player name"); endpoint.setAccessibilityLabel("Lobby server")
         title.setAccessibilityLabel("Room name"); invite.setAccessibilityLabel("Invite code")
+        title.delegate = self; password.delegate = self; name.delegate = self
+        spectatorLimit.target = self; spectatorLimit.action = #selector(optionsChanged)
         invite.delegate = self; invite.placeholderString = "ABCD-EFGH"
         // Selection belongs to this library, not to an arbitrary external path.
         defaults.removeObject(forKey: prefix + "gamePath")
@@ -235,32 +306,55 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
            let saved = defaults.string(forKey: prefix + "romID"), let uri = URL(string: saved),
            let id = context.persistentStoreCoordinator?.managedObjectID(forURIRepresentation: uri),
            let rom = try? context.existingObject(with: id) as? OEDBRom, !rom.isDeleted {
-            selectedROM = rom; gameLabel.stringValue = rom.game?.gameTitle ?? rom.game?.name ?? "Library game"
+            selectedROM = rom; updateSelectedGame()
         }
         createButton = button("Create Room", #selector(createRoom))
-        updateButton = button("Update Host Options", #selector(updateHost))
+        updateButton = button("Save Room Changes", #selector(updateHost))
         joinButton = button("Join Room", #selector(joinInvite))
-        browseJoinButton = button("Join Selected Room", #selector(joinListed))
+        browseJoinButton = button("Join Room", #selector(joinListed))
         saveButton = button("Save Defaults", #selector(saveDefaults))
         resumeGameButton = button("Resume Multiplayer Game…", #selector(chooseMultiplayerSave))
-        newGameButton = button("New Game", #selector(clearMultiplayerSave))
-        tab("Host Game", [row("Room name", title), publicRoom, protectedRoom, row("Password", password),
-                          spectators, row("Watcher limit", spectatorLimit), shareROM,
-                          label("Watchers use the room password and separate slots. Private games stay unlisted."),
-                          NSStackView(views: [createButton, updateButton]), resumeLabel,
-                          NSStackView(views: [resumeGameButton, newGameButton]),
-                          label("Multiplayer saves rebuild the shared game before starting. Long sessions may take time to load. Current game support is Super Mario Kart.")])
+        newGameButton = button("Start Fresh", #selector(clearMultiplayerSave))
         cancelTransferButton.target = self; cancelTransferButton.action = #selector(cancelROMTransfer); cancelTransferButton.isHidden = true
-        tab("Join with Invite", [row("Invite code", invite), row("Password", joinPassword), row("Join as", joinRole), joinButton])
         rebuildRelayPicker()
         relayPicker.target = self; relayPicker.action = #selector(selectRelay)
-        relayPicker.setAccessibilityLabel("Relay for hosting and invites")
-        tab("Browse Games", [makeDirectoryTable(roomList, columns: [("game", "Game / Host", 210), ("relay", "Relay", 135), ("players", "Players", 65), ("options", "Options", 100)]),
-                             row("Password", browsePassword), row("Join as", browseRole),
-                             NSStackView(views: [browseJoinButton, button("Refresh Games", #selector(refreshDirectory))])])
+        relayPicker.setAccessibilityLabel("Relay fallback")
+        roomList.target = self; roomList.doubleAction = #selector(joinListed)
+        let joinItem = NSTabViewItem(identifier: "Join Game"); joinItem.label = "Join Game"
+        let joinHolder = NSView()
+        let hostList = makeDirectoryTable(roomList, columns: [("game", "Game / Host", 230), ("relay", "Relay", 170), ("players", "Players", 70), ("options", "Options", 130)])
+        hostList.autohidesScrollers = true
+        roomList.rowHeight = 44
+        hostList.heightAnchor.constraint(greaterThanOrEqualToConstant: 210).isActive = true
+        let joinFields = NSStackView(views: [row("Player name", name), row("Join as", joinRole),
+            row("Invite code", invite), row("Room password", joinPassword)])
+        joinFields.orientation = .vertical; joinFields.alignment = .leading; joinFields.spacing = 8
+        joinFields.distribution = .fill
+        for fieldRow in joinFields.arrangedSubviews {
+            fieldRow.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        }
+        joinFields.heightAnchor.constraint(equalToConstant: 136).isActive = true
+        joinFields.setContentHuggingPriority(.required, for: .vertical)
+        joinFields.setContentCompressionResistancePriority(.required, for: .vertical)
+        let refreshGames = button("Refresh Games", #selector(refreshDirectory))
+        refreshGames.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        let refreshRow = NSStackView(views: [refreshGames, NSView()])
+        refreshRow.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        let joinStack = NSStackView(views: [joinFields, hostList, refreshRow])
+        joinStack.orientation = .vertical; joinStack.alignment = .leading; joinStack.spacing = 12; joinStack.distribution = .fill
+        joinStack.translatesAutoresizingMaskIntoConstraints = false; joinHolder.addSubview(joinStack)
+        NSLayoutConstraint.activate([joinStack.leadingAnchor.constraint(equalTo: joinHolder.leadingAnchor),
+            joinStack.trailingAnchor.constraint(equalTo: joinHolder.trailingAnchor),
+            joinStack.topAnchor.constraint(equalTo: joinHolder.topAnchor),
+            joinStack.bottomAnchor.constraint(equalTo: joinHolder.bottomAnchor, constant: -10),
+            hostList.widthAnchor.constraint(equalTo: joinStack.widthAnchor),
+            refreshRow.widthAnchor.constraint(equalTo: joinStack.widthAnchor)])
+        hostList.setContentHuggingPriority(.defaultLow, for: .vertical)
+        hostList.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        joinItem.view = joinHolder; tabs.addTabViewItem(joinItem)
         tab("Relays", [makeDirectoryTable(relayTable, columns: [("name", "Relay / Region", 220), ("operator", "Operator", 180), ("health", "Status", 140)]),
                        NSStackView(views: [button("Refresh Relays", #selector(refreshDirectory)), button("Use Selected Relay", #selector(useSelectedRelay)), button("Register a Relay…", #selector(registerRelay))])])
-        tab("Settings", [row("Display name", name), row("Lobby server", endpoint), row("Connection", route),
+        tab("Settings", [row("Lobby server", endpoint), row("Connection", route),
                          row("STUN service", stunProvider), row("Custom server", customSTUN),
                          label("STUN discovers a route; it does not carry gameplay. The selected provider sees your public network address. Changes apply to the next connection."),
                          button("Check Network…", #selector(checkNetwork)), networkResult,
@@ -269,53 +363,262 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         chooseButton = button("Choose Game…", #selector(chooseGame))
         copyButton = button("Copy Invite", #selector(copyInvite))
         leaveButton = button("Leave Room", #selector(leaveRoom))
-        launchButton = button("Connect to Game", #selector(launchGame))
-        let top = NSStackView(views: [gameLabel, chooseButton]); top.orientation = .horizontal
+        launchButton = button("Create Room", #selector(primaryRoomAction))
+        gameArtwork.imageScaling = .scaleProportionallyUpOrDown
+        gameArtwork.setAccessibilityLabel("Selected game artwork")
+        gameArtwork.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        gameArtwork.heightAnchor.constraint(equalToConstant: 72).isActive = true
+        gameLabel.font = .boldSystemFont(ofSize: 16)
+        gameValidation.font = .systemFont(ofSize: 12)
+        let details = NSStackView(views: [gameLabel, gameValidation]); details.orientation = .vertical; details.alignment = .leading
+        let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        chooseButton.setContentHuggingPriority(.required, for: .horizontal)
+        let top = NSStackView(views: [gameArtwork, details, spacer, chooseButton]); top.orientation = .horizontal; top.spacing = 12
+        transferProgress.isHidden = true; transferProgress.style = .bar; transferProgress.minValue = 0; transferProgress.maxValue = 100
         status.textColor = .secondaryLabelColor
-        let stack = NSStackView(views: [top, row("Host / Invite relay", relayPicker), tabs, roomStatus, status, label("The host’s multiplayer game saves automatically. To keep a separate copy, use Network Play → Export Multiplayer Save. Closing this panel keeps you connected; use Leave Room to disconnect."), NSStackView(views: [launchButton, leaveButton, copyButton, cancelTransferButton])])
-        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
+        let directHint = label("Direct connection is tried first. The relay is used only when needed.")
+        directHint.textColor = .secondaryLabelColor
+        let resumeActions = NSStackView(views: [resumeGameButton, newGameButton])
+        resumeActions.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        let roomColumn = settingsColumn("Room", [fieldGroup("Room name", title),
+            fieldGroup("Relay Fallback", relayPicker), directHint,
+            fieldGroup("Saved Multiplayer Session", resumeActions), resumeLabel])
+        let downloadHint = label("Players only, with your approval. Spectators cannot download games.")
+        downloadHint.textColor = .secondaryLabelColor
+        let accessColumn = settingsColumn("Access & Players", [publicRoom, protectedRoom,
+            password, spectators, fieldGroup("Spectator limit", spectatorLimit), shareROM, downloadHint])
+        let columns = NSStackView(views: [roomColumn, accessColumn])
+        columns.orientation = .horizontal; columns.alignment = .top; columns.spacing = 32; columns.distribution = .fillEqually
+        roomColumn.widthAnchor.constraint(equalTo: accessColumn.widthAnchor).isActive = true
+        let createActions = NSStackView(views: [NSView(), updateButton])
+        tab("Host Game", [columns, createActions])
+        let hostTab = tabs.tabViewItems.last!; tabs.removeTabViewItem(hostTab); tabs.insertTabViewItem(hostTab, at: 0)
+        tabs.tabViewType = .noTabsNoBorder
+        navigation.segmentStyle = .rounded; navigation.controlSize = .large
+        navigation.target = self; navigation.action = #selector(selectSection); navigation.selectedSegment = 0
+        tabs.selectTabViewItem(at: 0)
+        for primary in [launchButton!, createButton!] {
+            if #available(macOS 26.0, *) { primary.bezelStyle = .glass } else { primary.bezelStyle = .rounded }
+            primary.controlSize = .large; primary.font = .boldSystemFont(ofSize: 15)
+            primary.heightAnchor.constraint(equalToConstant: 44).isActive = true
+            primary.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+            primary.bezelColor = .controlAccentColor
+        }
+        downloadButton = button("Download Game…", #selector(downloadGame))
+        exportButton = button("Export Multiplayer Save…", #selector(saveMultiplayerGame))
+
+        let actions = NSStackView(views: [leaveButton, copyButton, downloadButton, cancelTransferButton, NSView(), launchButton])
+        actions.spacing = 10
+        let statusHeading = label("Game Status"); statusHeading.font = .boldSystemFont(ofSize: 13)
+        let footer = NSStackView(views: [statusHeading, roomStatus, romMatch, status, transferProgress])
+        footer.orientation = .vertical; footer.alignment = .leading; footer.spacing = 10; footer.distribution = .fill
+        for view in [roomStatus, romMatch, status, transferProgress] {
+            view.widthAnchor.constraint(equalTo: footer.widthAnchor).isActive = true
+            view.setContentCompressionResistancePriority(.required, for: .vertical)
+            view.setContentHuggingPriority(.required, for: .vertical)
+        }
+        let navigationSurface = glassSurface(navigation, inset: 4)
+        // Keep actions as floating native glass controls, not a full-width glass slab.
+        let actionSurface = actions
+        actions.alignment = .centerY
+        actions.heightAnchor.constraint(equalToConstant: 48).isActive = true
+        for control in [leaveButton, copyButton, downloadButton, cancelTransferButton].compactMap({ $0 }) {
+            control.controlSize = .large
+            if #available(macOS 26.0, *) { control.bezelStyle = .glass }
+        }
+        let saveNote = NSStackView(views: [label("The host’s multiplayer game saves automatically."), exportButton])
+        let statusPane = NSView()
+        footer.translatesAutoresizingMaskIntoConstraints = false; statusPane.addSubview(footer)
+        NSLayoutConstraint.activate([footer.topAnchor.constraint(equalTo: statusPane.topAnchor, constant: 14),
+            footer.leadingAnchor.constraint(equalTo: statusPane.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: statusPane.trailingAnchor),
+            footer.bottomAnchor.constraint(lessThanOrEqualTo: statusPane.bottomAnchor, constant: -8)])
+        let split = NSSplitView(); statusSplit = split; statusPaneView = statusPane; gameHeaderView = top; actionSurfaceView = actionSurface; saveNoteView = saveNote
+        split.isVertical = false; split.dividerStyle = .thin
+        split.delegate = self
+        split.addArrangedSubview(tabs); split.addArrangedSubview(statusPane)
+        let navigationRow = NSView()
+        navigationSurface.translatesAutoresizingMaskIntoConstraints = false; navigationRow.addSubview(navigationSurface)
+        NSLayoutConstraint.activate([navigationSurface.centerXAnchor.constraint(equalTo: navigationRow.centerXAnchor),
+            navigationSurface.topAnchor.constraint(equalTo: navigationRow.topAnchor),
+            navigationSurface.bottomAnchor.constraint(equalTo: navigationRow.bottomAnchor)])
+        let stack = NSStackView(views: [navigationRow, top, split, actionSurface, saveNote])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 18; stack.distribution = .fill
         stack.translatesAutoresizingMaskIntoConstraints = false; panel.contentView!.addSubview(stack)
-        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: panel.contentView!.leadingAnchor, constant: 20),
-                                     stack.topAnchor.constraint(equalTo: panel.contentView!.topAnchor, constant: 20),
-                                     stack.trailingAnchor.constraint(equalTo: panel.contentView!.trailingAnchor, constant: -20),
-                                     stack.bottomAnchor.constraint(lessThanOrEqualTo: panel.contentView!.bottomAnchor, constant: -20),
-                                     tabs.widthAnchor.constraint(equalTo: stack.widthAnchor), tabs.heightAnchor.constraint(greaterThanOrEqualToConstant: 430),
-                                     status.widthAnchor.constraint(equalTo: stack.widthAnchor), roomStatus.widthAnchor.constraint(equalTo: stack.widthAnchor)])
-        let preferredTabHeight = tabs.heightAnchor.constraint(equalTo: panel.contentView!.heightAnchor, constant: -410)
-        preferredTabHeight.priority = .defaultHigh
-        preferredTabHeight.isActive = true
+        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: panel.contentView!.leadingAnchor, constant: 24),
+            stack.topAnchor.constraint(equalTo: panel.contentView!.topAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: panel.contentView!.trailingAnchor, constant: -24),
+            stack.bottomAnchor.constraint(equalTo: panel.contentView!.bottomAnchor, constant: -20),
+            navigationRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            top.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            split.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            split.heightAnchor.constraint(greaterThanOrEqualToConstant: 320),
+            actionSurface.widthAnchor.constraint(equalTo: stack.widthAnchor)])
+        split.setContentHuggingPriority(.defaultLow, for: .vertical)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        layoutStatusSplit(split)
+        footer.setContentHuggingPriority(.required, for: .vertical)
+        footer.setContentCompressionResistancePriority(.required, for: .vertical)
         tabs.delegate = self
+        updateSelectedGame()
         refreshControls()
+        directoryTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 5_000_000_000) } catch { return }
+                guard let self else { return }
+                guard self.panel.isVisible else { continue }
+                self.refreshArtwork()
+                if self.navigation.selectedSegment == 1 && self.room == nil && !self.busy { self.refreshDirectory() }
+            }
+        }
     }
     func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
         guard !busy, let identifier = tabViewItem?.identifier as? String,
-              identifier == "Browse Games" || identifier == "Relays" else { return }
+              identifier == "Join Game" || identifier == "Relays" else { return }
         refreshDirectory()
     }
-    @objc private func optionsChanged() { refreshControls() }
+    @objc private func selectSection() {
+        tabs.selectTabViewItem(at: navigation.selectedSegment)
+        refreshJoinIdentity()
+        refreshControls()
+    }
+    private func refreshJoinIdentity() {
+        let value = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        joinIdentity.stringValue = value.isEmpty ? "Your name is not set. Enter a player name above before joining." : "Joining as \(value)"
+    }
+    @objc private func optionsChanged() { hostOptionsDirty = room?["role"] as? String == "host"; refreshControls() }
     private func refreshControls() {
         guard panel != nil else { return }
+        updatePageLayout()
+        roomStatus.isHidden = roomStatus.stringValue.isEmpty
+        romMatch.isHidden = romMatch.stringValue.isEmpty
         for button in operationButtons { button.isEnabled = !busy }
         shareROM.isEnabled = !busy && gameProcess == nil
         resumeGameButton.isEnabled = !busy && room == nil && gameProcess == nil
+        resumeLabel.isHidden = resumeURL == nil
+        newGameButton.isHidden = resumeURL == nil
         newGameButton.isEnabled = !busy && room == nil && resumeURL != nil
         let isHost = room?["role"] as? String == "host"
         let waitingForPlayer = isHost && (room?["occupancy"] as? Int ?? 0) < 2
         let waitingForHost = room != nil && !isHost && room?["state"] as? String != "playing"
-        launchButton.title = gameConnected ? "Connected" : (gameLaunching || gameProcess != nil) ? "Connecting…" : waitingForPlayer ? "Waiting for Player 2" : waitingForHost ? "Waiting for Host" : isHost ? "Start Game" : "Connect to Game"
+        let transferState = (room?["rom_request"] as? [String: Any])?["status"] as? String
+        let transferPending = transferProcess != nil || room?["state"] as? String == "transferring" || transferState == "pending" || transferState == "approved"
+        let creatingRoom = room == nil && navigation.selectedSegment == 0
+        let joiningRoom = room == nil && navigation.selectedSegment == 1
+        let hasInvite = !invite.stringValue.isEmpty
+        let selectedHost = listedRooms.indices.contains(roomList.selectedRow) ? listedRooms[roomList.selectedRow] : nil
+        let joinTitle = hasInvite ? "Join by Code" : selectedHost.map { "Join " + String(($0["host_name"] as? String ?? $0["title"] as? String ?? "Host").prefix(32)) } ?? "Join Game"
+        launchButton.title = creatingRoom ? "Create Room" : joiningRoom ? joinTitle : gameConnected ? "Connected" : (gameLaunching || gameProcess != nil) ? "Connecting…" : waitingForHost ? "Waiting for host to start…" : isHost ? "Start Game" : "Connect to Game"
         relayPicker.isEnabled = !busy && room == nil && gameProcess == nil
-        launchButton.isEnabled = !busy && room != nil && gameProcess == nil && !waitingForPlayer && !waitingForHost
+        launchButton.isEnabled = !busy && gameProcess == nil && (creatingRoom ? selectedROM != nil : joiningRoom ? (!name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (hasInvite || selectedHost != nil)) : room != nil && !waitingForPlayer && !waitingForHost && !transferPending && verifiedSHA != nil)
+        launchButton.isHidden = navigation.selectedSegment > 1
+        launchButton.keyEquivalent = launchButton.isEnabled && !launchButton.isHidden ? "\r" : ""
+        launchButton.toolTip = waitingForPlayer ? "Waiting for another player to join before starting." : nil
+        updateConnectPulse(launchButton.isEnabled && room != nil && !gameConnected)
         createButton.isEnabled = !busy && room == nil && gameProcess == nil
         joinButton.isEnabled = !busy && room == nil && gameProcess == nil
         browseJoinButton.isEnabled = !busy && room == nil && gameProcess == nil && listedRooms.indices.contains(roomList.selectedRow)
         copyButton.isHidden = room?["role"] as? String != "host"
         copyButton.isEnabled = !busy && room?["role"] as? String == "host" && room?["invite_code"] is String
         leaveButton.isEnabled = !busy && room != nil
-        updateButton.isEnabled = !busy && room?["role"] as? String == "host"
+        updateButton.isHidden = !isHost || !hostOptionsDirty
+        updateButton.isEnabled = !busy && isHost && hostOptionsDirty
+        createButton.isHidden = room != nil
+        downloadButton.isHidden = room == nil || isHost || room?["role"] as? String == "spectator" || verifiedSHA != nil || room?["allow_downloads"] as? Bool != true
+        downloadButton.isEnabled = !busy && !transferPending && room?["state"] as? String != "playing"
+        exportButton.isHidden = currentAutosaveURL == nil
+        exportButton.isEnabled = !busy && currentAutosaveURL.map { FileManager.default.fileExists(atPath: $0.path) } == true
         chooseButton.isEnabled = !busy && room == nil; saveButton.isEnabled = !busy && room == nil
         endpoint.isEnabled = !busy && room == nil; name.isEnabled = !busy && room == nil
-        password.isEnabled = !busy && protectedRoom.state == .on
-        spectatorLimit.isEnabled = !busy && spectators.state == .on
+        refreshJoinIdentity()
+        let editable = !busy && (room == nil || isHost)
+        for control in [publicRoom, protectedRoom, spectators, shareROM] { control.isEnabled = editable }
+        title.isEnabled = editable && (room?["occupancy"] as? Int ?? 1) < 2
+        password.isEnabled = editable && protectedRoom.state == .on && (room?["occupancy"] as? Int ?? 1) < 2
+        spectatorLimit.isEnabled = editable && spectators.state == .on
+        publicRoom.isEnabled = editable && (room?["occupancy"] as? Int ?? 1) < 2
+        protectedRoom.isEnabled = publicRoom.isEnabled
+    }
+    private func updateConnectPulse(_ ready: Bool) {
+        let animate = ready && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        guard animate != connectPulseActive else { return }
+        connectPulseActive = animate; launchButton.wantsLayer = true
+        launchButton.layer?.removeAnimation(forKey: "connectReady")
+        if animate {
+            launchButton.layer?.cornerRadius = 9
+            let pulse = CABasicAnimation(keyPath: "backgroundColor")
+            pulse.fromValue = NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor
+            pulse.toValue = NSColor.controlAccentColor.withAlphaComponent(0.8).cgColor
+            pulse.duration = 1.2
+            pulse.autoreverses = true; pulse.repeatCount = .infinity
+            launchButton.layer?.add(pulse, forKey: "connectReady")
+        }
+    }
+    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { 420 }
+    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat { max(420, splitView.bounds.height - 110) }
+    func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool { false }
+    func splitView(_ sender: NSSplitView, resizeSubviewsWithOldSize oldSize: NSSize) {
+        layoutStatusSplit(sender)
+    }
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        guard !arrangingStatus, let split = statusSplit, let pane = statusPaneView, !pane.isHidden,
+              NSApp.currentEvent?.type == .leftMouseDragged else { return }
+        savedStatusHeight = max(110, pane.frame.height)
+    }
+    private func layoutStatusSplit(_ split: NSSplitView) {
+        guard !arrangingStatus, let pane = statusPaneView else { return }
+        arrangingStatus = true
+        defer { arrangingStatus = false }
+        let size = split.bounds.size
+        if pane.isHidden {
+            tabs.frame = NSRect(origin: .zero, size: size)
+            return
+        }
+        let statusHeight = min(savedStatusHeight, max(110, size.height - 421))
+        let topHeight = max(0, size.height - statusHeight - split.dividerThickness)
+        tabs.frame = NSRect(x: 0, y: 0, width: size.width, height: topHeight)
+        pane.frame = NSRect(x: 0, y: topHeight + split.dividerThickness, width: size.width, height: statusHeight)
+    }
+    private func updatePageLayout() {
+        guard let split = statusSplit, let pane = statusPaneView else { return }
+        let gamePage = navigation.selectedSegment < 2
+        let changingPageKind = pane.isHidden == gamePage
+        gameHeaderView?.isHidden = !gamePage
+        actionSurfaceView?.isHidden = !gamePage
+        saveNoteView?.isHidden = !gamePage
+        pane.isHidden = !gamePage
+        panel.contentMinSize = NSSize(width: 840, height: gamePage ? 840 : 700)
+        if changingPageKind {
+            panel.contentView?.layoutSubtreeIfNeeded()
+            layoutStatusSplit(split)
+        }
+    }
+    @objc private func primaryRoomAction() {
+        if room == nil {
+            if navigation.selectedSegment == 0 { createRoom() }
+            else if !invite.stringValue.isEmpty { joinInvite() }
+            else { joinListed() }
+        } else { launchGame() }
+    }
+    private func glassSurface(_ content: NSView, inset: CGFloat) -> NSView {
+        let surface: NSView
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView(); glass.cornerRadius = 20
+            let holder = NSView(); glass.contentView = holder; surface = glass
+            content.translatesAutoresizingMaskIntoConstraints = false; holder.addSubview(content)
+            NSLayoutConstraint.activate([content.leadingAnchor.constraint(equalTo: holder.leadingAnchor, constant: inset),
+                content.trailingAnchor.constraint(equalTo: holder.trailingAnchor, constant: -inset),
+                content.topAnchor.constraint(equalTo: holder.topAnchor, constant: inset),
+                content.bottomAnchor.constraint(equalTo: holder.bottomAnchor, constant: -inset)])
+        } else {
+            let effect = NSVisualEffectView(); effect.material = .sidebar; effect.blendingMode = .withinWindow
+            surface = effect; content.translatesAutoresizingMaskIntoConstraints = false; effect.addSubview(content)
+            NSLayoutConstraint.activate([content.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: inset),
+                content.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -inset),
+                content.topAnchor.constraint(equalTo: effect.topAnchor, constant: inset),
+                content.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -inset)])
+        }
+        return surface
     }
     private func fail(_ message: String) -> NSError { NSError(domain: "NetworkPlay", code: 1, userInfo: [NSLocalizedDescriptionKey: message]) }
     private func baseURL() throws -> URL {
@@ -464,7 +767,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         } catch { status.stringValue = error.localizedDescription }
     }
     @objc private func clearMultiplayerSave() {
-        resumeURL = nil; resumeLabel.stringValue = "Start a new multiplayer game."; refreshControls()
+        resumeURL = nil; resumeLabel.stringValue = ""; refreshControls()
     }
     @objc private func saveMultiplayerGame() {
         guard let source = currentAutosaveURL else { return }
@@ -485,7 +788,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     }
     private func displayName() throws -> String {
         let value = name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, value.count <= 32 else { throw fail("Enter a display name of 1–32 characters in Settings.") }; return value
+        guard !value.isEmpty, value.count <= 32 else { throw fail("Enter a player name of 1–32 characters on Join Game.") }; return value
     }
     private func authorizeRelay(_ base: URL, roomID: String) async throws -> [String: Any] {
         let result = try await api(base, "POST", "v1/rooms/" + roomID + "/relay-access", [:], token: memberToken)
@@ -521,7 +824,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                             "room_full": "Both player slots are occupied. Ask the host about watching.", "spectators_full": "All watcher slots are occupied.",
                             "spectators_disabled": "The host is not allowing spectators.", "incompatible_session": "The room compatibility does not match. Verify the game SHA-256 and install the same OpenEmu-NX build on both Macs.",
                             "rate_limited": "Too many attempts. Please wait a minute and try again.", "unauthorized": "Your room membership has expired.",
-                            "invalid_password": "Use a password of at most 128 characters.", "host_required": "Only the host can change this room.",
+                            "downloads_disabled": "The host has disabled game downloads for this room.", "invalid_password": "Use a password of at most 128 characters.", "rom_transfer_pending": "Wait for the ROM transfer and import to finish before starting the game.", "rom_request_before_start": "The host has already opened the game connection. Leave and rejoin a fresh room, then request the ROM before starting.", "stale_rom_request": "This ROM request is no longer active.", "player_required": "Only players can request a ROM.", "host_required": "Only the host can change this room.",
                             "relay_unavailable": "This lobby has no relay available. Choose Automatic or Direct only."]
             throw NSError(domain: "NetworkPlayLobby", code: response.statusCode, userInfo: [NSLocalizedDescriptionKey: messages[code] ?? "The lobby could not complete this request (\(code))."])
         }
@@ -533,6 +836,59 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             defer { self.busy = false; self.refreshControls() }
             do { try await operation() } catch { self.status.stringValue = error.localizedDescription }
         }
+    }
+    @objc static func hostLibraryGame(_ game: OEDBGame) {
+        let controller = NetworkPlayController.shared
+        controller.show(0)
+        guard !controller.busy, controller.room == nil, controller.gameProcess == nil else {
+            controller.status.stringValue = "Leave your current room before hosting another game."
+            return
+        }
+        guard let rom = game.defaultROM else { return }
+        controller.selectedROM = rom
+        controller.defaults.set(rom.objectID.uriRepresentation().absoluteString, forKey: controller.prefix + "romID")
+        controller.updateSelectedGame()
+        controller.status.stringValue = "Choose your host options, then Create Room."
+    }
+    private func updateSelectedGame() {
+        let revision = UUID(); selectionRevision = revision
+        guard let rom = selectedROM else { gameValidation.stringValue = ""; refreshArtwork(); return }
+        refreshArtwork()
+        gameValidation.textColor = .systemOrange
+        gameValidation.stringValue = "! Untested"
+        guard rom.game?.system?.systemIdentifier == "openemu.system.snes" else {
+            gameValidation.stringValue = "! Untested — this console’s netplay runtime is not available yet"
+            return
+        }
+        guard let url = rom.url else { return }
+        Task { @MainActor [weak self] in
+            let sha = await Task.detached(priority: .utility) { try? FileManager.default.hashFile(at: url, hashFunction: .sha256) }.value
+            guard let self, self.selectionRevision == revision else { return }
+            struct Catalog: Decodable { let games: [Entry] }
+            struct Entry: Decodable { let rom_sha256: String; let runtime_profile: String; let status: String; let notes: String }
+            let catalog = Bundle.main.url(forResource: "NetplayCompatibility", withExtension: "json")
+                .flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode(Catalog.self, from: $0) }
+            if let entry = catalog?.games.first(where: { $0.rom_sha256 == sha && $0.runtime_profile == "snes9x-1.63-general-v2-abi1" && $0.status == "tested" }) {
+                self.gameValidation.stringValue = "✓ Tested — " + entry.notes
+                self.gameValidation.textColor = .secondaryLabelColor
+            } else {
+                self.gameValidation.stringValue = "! Untested — experimental netplay; synchronization and saves are not validated"
+            }
+        }
+    }
+    private func refreshArtwork() {
+        guard let game = selectedROM?.game else {
+            gameLabel.stringValue = room?["game"] as? String ?? "Choose a game from your library."
+            gameArtwork.image = NSImage(systemSymbolName: "gamecontroller", accessibilityDescription: "No cover artwork")
+            artworkKey = ""; return
+        }
+        gameLabel.stringValue = game.displayName
+        let url = game.boxImage?.imageURL
+        let stamp = url.flatMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }?.timeIntervalSince1970 ?? 0
+        let key = game.objectID.uriRepresentation().absoluteString + (url?.path ?? "") + String(stamp)
+        guard key != artworkKey else { return }
+        artworkKey = key
+        gameArtwork.image = url.flatMap(NSImage.init(contentsOf:)) ?? NSImage(systemSymbolName: "gamecontroller", accessibilityDescription: "Artwork not available yet")
     }
     @objc private func chooseGame() {
         guard let context = OELibraryDatabase.default?.mainThreadContext else {
@@ -548,7 +904,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                 self.libraryBrowser = nil
                 guard let rom else { return }
                 self.selectedROM = rom
-                self.gameLabel.stringValue = rom.game?.gameTitle ?? rom.game?.name ?? "Library game"
+                self.updateSelectedGame()
                 self.defaults.set(rom.objectID.uriRepresentation().absoluteString, forKey: self.prefix + "romID")
                 self.status.stringValue = "Library game selected. Compatibility is checked when creating or joining a room."
             }
@@ -576,15 +932,10 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             let alert = NSAlert(); alert.messageText = "Matching game not found in your library"
             alert.informativeText = "No readable, uncompressed library game matches the host’s SHA-256:\n\(expectedSHA)\n\nChoose a library game to verify it, or cancel and import the matching game first. Different revisions will not connect."
             alert.addButton(withTitle: "Choose Library Game…"); alert.addButton(withTitle: "Cancel")
-            if allowTransfer { alert.addButton(withTitle: "Request ROM from Host…") }
+            if allowTransfer { alert.addButton(withTitle: "Join Room to Download…") }
             let answer = alert.runModal()
             if allowTransfer && answer == .alertThirdButtonReturn {
-                let consent = NSAlert()
-                consent.messageText = "Request this ROM from the host?"
-                consent.informativeText = "Only accept if you own this game and are authorized to receive this copy. The host must enable ROM sharing and start the game. The file is sent over the peer connection, using the relay if needed. Its SHA-256 will be checked before import. Existing ROMs and saves will not be replaced."
-                consent.addButton(withTitle: "I Own the Game — Request ROM")
-                consent.addButton(withTitle: "Cancel")
-                guard consent.runModal() == .alertFirstButtonReturn else { throw fail("ROM request cancelled.") }
+                selectedROM = nil; verifiedSHA = nil; refreshArtwork()
                 return false
             }
             guard answer == .alertFirstButtonReturn else { throw fail("Join cancelled. Import the matching game and try again. Expected SHA-256: \(expectedSHA)") }
@@ -609,7 +960,9 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         }
         guard let rom = chosen, !rom.isDeleted else { throw fail("The library game is no longer available.") }
         selectedROM = rom
-        gameLabel.stringValue = rom.game?.gameTitle ?? rom.game?.name ?? "Library game"
+        verifiedSHA = expectedSHA
+        romMatch.stringValue = "✓ ROM matches the host — SHA-256 verified."
+        updateSelectedGame()
         defaults.set(rom.objectID.uriRepresentation().absoluteString, forKey: prefix + "romID")
         status.stringValue = "Matching game selected; SHA-256 verified. Joining…"
         return true
@@ -619,6 +972,9 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
               let gameURL = rom.url else { throw fail("Choose an imported game from your OpenEmu library first.") }
         guard rom.archiveFileIndex == nil else { throw fail("This Network Play preview requires an uncompressed library game. Compressed library games are not supported yet.") }
         guard FileManager.default.isReadableFile(atPath: gameURL.path) else { throw fail("The selected library game's file is missing. Relocate it in OpenEmu, then select it again.") }
+        guard rom.game?.system?.systemIdentifier == "openemu.system.snes" else {
+            throw fail("This console does not yet have a Network Play runtime. It remains available for local play. Untested SNES games can be hosted now.")
+        }
         let expected = expectedSHA?.lowercased()
         if let expected {
             // Report a different file as a SHA mismatch before the runtime's
@@ -647,7 +1003,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                        actual != expected {
                         message = "Game SHA-256 mismatch. Host: \(expected). Your file: \(actual). Choose the same game revision as the host."
                     } else {
-                        message = "This game is not supported by the current Network Play build. Choose Super Mario Kart NTSC v1.0 from your library."
+                        message = "The network runtime could not load this game. Check that it is a valid, uncompressed SNES ROM."
                     }
                     continuation.resume(throwing: NSError(domain: "NetworkPlay", code: 2, userInfo: [NSLocalizedDescriptionKey: message]))
                 }
@@ -666,9 +1022,12 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         return result
     }
     private func hostOptions(newRoom: Bool) throws -> [String: Any] {
-        var result: [String: Any] = ["allow_spectators": spectators.state == .on, "spectator_limit": spectatorLimit.indexOfSelectedItem + 1]
+        var result: [String: Any] = ["allow_downloads": shareROM.state == .on, "allow_spectators": spectators.state == .on, "spectator_limit": spectatorLimit.indexOfSelectedItem + 1]
+        if newRoom { result["game"] = selectedROM?.game?.displayName ?? "Network game" }
         if newRoom || (room?["occupancy"] as? Int ?? 1) < 2 {
-            result["title"] = title.stringValue
+            let roomName = title.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !roomName.isEmpty else { throw fail("Enter a room name before creating or updating the room.") }
+            result["title"] = roomName
             result["visibility"] = publicRoom.state == .on ? "public" : "unlisted"
             if protectedRoom.state == .off { result["password"] = "" }
             else if !password.stringValue.isEmpty { result["password"] = password.stringValue }
@@ -681,7 +1040,9 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         perform {
             let base = try self.baseURL(); let username = try self.displayName()
             var body = try self.hostOptions(newRoom: true); self.password.stringValue = ""
-            body["username"] = username; body["compatibility"] = try await self.identity()
+            body["username"] = username; let compatibility = try await self.identity(); body["compatibility"] = compatibility
+            self.verifiedSHA = compatibility["rom_sha256"] as? String
+            self.romMatch.stringValue = "✓ Host game verified. Players must match its SHA-256."
             let response = try await self.api(base, "POST", "v1/rooms", body)
             try self.admit(response, tokenKey: "owner_token", base: base)
         }
@@ -692,9 +1053,14 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         return String(code.prefix(4)) + "-" + String(code.dropFirst(4))
     }
     func controlTextDidChange(_ notification: Notification) {
-        guard let field = notification.object as? NSTextField, field === invite else { return }
+        guard let field = notification.object as? NSTextField else { return }
+        if field === title || field === password { optionsChanged(); return }
+        if field === name { defaults.set(name.stringValue, forKey: prefix + "displayName"); refreshJoinIdentity(); refreshControls(); return }
+        guard field === invite else { return }
         let formatted = Self.displayInvite(field.stringValue)
         if field.stringValue != formatted { field.stringValue = formatted }
+        if !formatted.isEmpty { roomList.deselectAll(nil) }
+        refreshControls()
     }
     @objc private func joinInvite() {
         guard !busy, room == nil, gameProcess == nil else { return }
@@ -704,7 +1070,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     }
     @objc private func joinListed() {
         let index = roomList.selectedRow; guard listedRooms.indices.contains(index), let id = listedRooms[index]["id"] as? String else { return }
-        join(locator: ["room_id": id], secret: browsePassword.stringValue, role: browseRole.indexOfSelectedItem, lobby: (listedRooms[index]["relay_endpoint"] as? String).flatMap(URL.init(string:)))
+        join(locator: ["room_id": id], secret: joinPassword.stringValue, role: joinRole.indexOfSelectedItem, lobby: (listedRooms[index]["relay_endpoint"] as? String).flatMap(URL.init(string:)))
     }
     private func join(locator: [String: Any], secret: String, role: Int, lobby: URL? = nil) {
         guard room == nil, gameProcess == nil else { return }
@@ -718,7 +1084,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                   expected.range(of: "^[a-fA-F0-9]{64}$", options: .regularExpression) != nil else {
                 throw self.fail("The host did not provide a valid game SHA-256.")
             }
-            let haveROM = try await self.matchLibraryGame(expectedSHA: expected.lowercased(), profile: compatibility["profile"] as? String ?? "", allowTransfer: role == 0)
+            let haveROM = try await self.matchLibraryGame(expectedSHA: expected.lowercased(), profile: compatibility["profile"] as? String ?? "", allowTransfer: role == 0 && target["allow_downloads"] as? Bool == true)
             var body = locator
             body["username"] = try self.displayName(); body["password"] = secret; body["role"] = role == 0 ? "player" : "spectator"
             body["compatibility"] = haveROM ? try await self.identity(expectedSHA: expected) : compatibility
@@ -726,18 +1092,23 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             self.joinPassword.stringValue = ""; self.browsePassword.stringValue = ""
             try self.admit(response, tokenKey: "member_token", base: base)
             if !haveROM {
-                do {
-                    try await self.receiveROM(expectedSHA: expected.lowercased(), base: base)
-                    _ = try await self.identity(expectedSHA: expected)
-                    self.status.stringValue = "ROM received, SHA-256 verified and imported. Choose Connect to Game."
-                } catch {
-                    if let id = self.room?["id"] as? String {
-                        _ = try? await self.api(base, "DELETE", "v1/rooms/" + id + "/membership", [:], token: self.memberToken)
-                    }
-                    self.clearRoom()
-                    throw error
-                }
+                self.romMatch.stringValue = "! No matching ROM in your library. Download the game before connecting."
+                self.status.stringValue = "Joined the room. Choose Download Game to request a copy from the host."
             }
+        }
+    }
+    @objc private func downloadGame() {
+        guard !busy, let base = activeEndpoint, let compatibility = room?["compatibility"] as? [String: Any],
+              let expected = compatibility["rom_sha256"] as? String, room?["allow_downloads"] as? Bool == true else { return }
+        let consent = NSAlert(); consent.messageText = "Download this game from the host?"
+        consent.informativeText = "Only accept if you own the game and are authorized to receive this copy. The host must approve. The file is verified by SHA-256 and imported into your library without replacing your ROMs or saves."
+        consent.addButton(withTitle: "I Own the Game — Request Download"); consent.addButton(withTitle: "Cancel")
+        guard consent.runModal() == .alertFirstButtonReturn else { return }
+        perform {
+            try await self.receiveROM(expectedSHA: expected.lowercased(), base: base)
+            _ = try await self.identity(expectedSHA: expected)
+            self.romMatch.stringValue = "✓ Download complete — SHA-256 matches the host."
+            self.status.stringValue = "Game imported. Waiting for the host to start."
         }
     }
     @objc private func cancelROMTransfer() { transferProcess?.terminate() }
@@ -762,7 +1133,11 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             guard !FileManager.default.fileExists(atPath: url.path) else { throw fail("Choose a new filename; downloads never replace existing ROMs.") }
             importURL = url
         }
+        status.stringValue = "Requesting permission from the host…"
+        _ = try await api(base, "POST", "v1/rooms/\(id)/rom-request", [:], token: memberToken)
+        let progressURL = directory.appendingPathComponent("transfer-progress.json")
         var launch: [String: Any] = ["endpoint": base.absoluteString, "room_id": id, "token": memberToken,
+                                   "rom_transfer_progress": progressURL.path, "require_rom_approval": true,
                                    "receive_rom": destination.path, "expected_rom_sha256": expectedSHA,
                                    "connection": "automatic", "headless": true]
         if let servers = try selectedSTUN() { launch["stun_servers"] = servers }
@@ -772,8 +1147,23 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
         transferProcess = process
         cancelTransferButton.isHidden = false
-        defer { transferProcess = nil; cancelTransferButton.isHidden = true }
-        status.stringValue = "Waiting for the host to enable ROM sharing and Start Game. Transfer times out after three minutes."
+        transferProgress.isHidden = false; transferProgress.isIndeterminate = true; transferProgress.startAnimation(nil)
+        let monitor = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                if let data = try? Data(contentsOf: progressURL), data.count < 4096,
+                   let report = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let self {
+                    let received = report["received"] as? Double ?? 0, total = report["total"] as? Double ?? 0
+                    self.transferProgress.isIndeterminate = total <= 0
+                    if total > 0 {
+                        self.transferProgress.stopAnimation(nil); self.transferProgress.doubleValue = received / total * 100
+                        self.status.stringValue = "Downloading ROM: \(Int(received / total * 100))% — \(Int(received / 1024)) / \(Int(total / 1024)) KB"
+                    } else { self.status.stringValue = report["phase"] as? String ?? "Waiting for host approval…" }
+                }
+                do { try await Task.sleep(nanoseconds: 200_000_000) } catch { break }
+            }
+        }
+        defer { monitor.cancel(); transferProgress.stopAnimation(nil); transferProgress.isHidden = true; transferProcess = nil; cancelTransferButton.isHidden = true }
+        status.stringValue = "Waiting for host approval… You can cancel below."
         try process.run()
         try input.fileHandleForWriting.write(contentsOf: JSONSerialization.data(withJSONObject: launch) + Data([10]))
         try input.fileHandleForWriting.close()
@@ -786,6 +1176,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             let response = try? JSONSerialization.jsonObject(with: result.1) as? [String: Any]
             throw fail(response?["error"] as? String ?? "ROM transfer failed. Ask the host to allow ROM downloads, then try again.")
         }
+        monitor.cancel(); status.stringValue = "Download complete. Verifying SHA-256…"
         let actual = try await Task.detached(priority: .utility) { try FileManager.default.hashFile(at: destination, hashFunction: .sha256) }.value
         guard actual == expectedSHA else { throw fail("Received ROM SHA-256 does not match the host. The file was not imported.") }
         if importURL != destination { try FileManager.default.copyItem(at: destination, to: importURL) }
@@ -798,13 +1189,17 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             throw fail("The ROM passed verification but could not be imported. Please retry the transfer or import your local copy.")
         }
         selectedROM = rom
-        gameLabel.stringValue = rom.game?.gameTitle ?? rom.game?.name ?? "Received game"
+        if rom.game?.boxImage == nil { rom.game?.requestInfoSync() }
+        verifiedSHA = expectedSHA
+        romMatch.stringValue = "✓ ROM matches the host — SHA-256 verified."
+        updateSelectedGame()
         defaults.set(rom.objectID.uriRepresentation().absoluteString, forKey: prefix + "romID")
+        _ = try await api(base, "POST", "v1/rooms/\(id)/rom-request", ["complete": true], token: memberToken)
     }
 
     private func admit(_ response: [String: Any], tokenKey: String, base: URL) throws {
         guard let room = response["room"] as? [String: Any], let token = response[tokenKey] as? String, room["id"] is String else { throw fail("The lobby returned an incomplete room.") }
-        gameMessage = nil; self.room = room; memberToken = token; activeEndpoint = base; renderRoom()
+        hostOptionsDirty = false; gameMessage = nil; self.room = room; memberToken = token; activeEndpoint = base; renderRoom()
         heartbeatTask?.cancel()
         heartbeatTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -817,13 +1212,13 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     private func renderRoom() {
         guard let room else { roomStatus.stringValue = ""; return }
         let role = room["role"] as? String ?? "member"
-        roomStatus.stringValue = "\(room["title"] as? String ?? "Room") · \(role.capitalized)\nPlayers: \(room["occupancy"] as? Int ?? 1)/2 · Watchers: \(room["spectators"] as? Int ?? 0)/\(room["spectator_limit"] as? Int ?? 0)"
+        roomStatus.stringValue = "\(room["title"] as? String ?? "Room") · \(role.capitalized)\nPlayers connected: \(room["occupancy"] as? Int ?? 1)/\(room["capacity"] as? Int ?? 2) · Spectators: \(room["spectators"] as? Int ?? 0)/\(room["spectator_limit"] as? Int ?? 0)"
         if let code = room["invite_code"] as? String { roomStatus.stringValue += "\nInvite: \(Self.displayInvite(code))" }
         if let remaining = room["lifetime_remaining_seconds"] as? Int, remaining <= 900 {
             let minutes = max(0, Int(ceil(Double(remaining) / 60)))
             roomStatus.stringValue += "\nSession ends in \(minutes) minute\(minutes == 1 ? "" : "s"). Save and start a new room to continue."
         }
-        status.stringValue = gameMessage ?? (gameProcess == nil ? (role == "host" ? ((room["occupancy"] as? Int ?? 1) < 2 ? "You are hosting. Share your invite; waiting for Player 2." : "Both players are in the room. Choose Start Game.") : (room["state"] as? String == "playing" ? "The host has started. Choose Connect to Game." : "You have joined the room. Waiting for the host to start the game.")) : "Network game window is open. Spectators are read-only.")
+        status.stringValue = gameMessage ?? (gameProcess == nil ? (role == "host" ? ((room["occupancy"] as? Int ?? 1) < 2 ? "You are hosting. Share your invite; waiting for another player." : "Players are in the room. Choose Start Game.") : (room["state"] as? String == "playing" ? "The host has started. Choose Connect to Game." : "You have joined the room. Waiting for the host to start the game.")) : "Network game window is open. Spectators are read-only.")
         refreshControls()
     }
     private func heartbeat() async {
@@ -834,12 +1229,82 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         do {
             let result = try await api(base, "POST", "v1/rooms/\(id)/heartbeat", [:], token: token)
             guard room?["id"] as? String == id, memberToken == token, !busy else { return }
-            if let current = result["room"] as? [String: Any] { room = current; renderRoom() }
+            if let current = result["room"] as? [String: Any] { room = current; renderRoom(); offerROMRequest() }
         } catch {
             guard room?["id"] as? String == id, memberToken == token, !busy else { return }
             let failure = error as NSError
             if failure.domain == "NetworkPlayLobby" && [401,404].contains(failure.code) { clearRoom() }
             status.stringValue = "Room update failed: " + error.localizedDescription
+        }
+    }
+    private func sendRequestedROM(base: URL, roomID: String) async throws {
+        guard let rom = selectedROM?.url else { throw fail("Choose the host’s game first.") }
+        let progressDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: progressDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: progressDirectory) }
+        let progressURL = progressDirectory.appendingPathComponent("upload.json")
+        var config: [String: Any] = ["endpoint": base.absoluteString, "room_id": roomID, "token": memberToken,
+                                    "rom_transfer_progress": progressURL.path, "rom": rom.path, "serve_rom": true, "headless": true, "allow_rom_transfer": true,
+                                    "connection": "automatic", "rollback": true, "delay": 3]
+        if let servers = try selectedSTUN() { config["stun_servers"] = servers }
+        config["relay_network"] = try await authorizeRelay(base, roomID: roomID)
+        if base.scheme == "http", ["127.0.0.1", "localhost"].contains(base.host ?? "") { config["local_test_mode"] = true }
+        let process = Process(), input = Pipe(), output = Pipe()
+        process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/NetworkPlay/NetworkPlay.app/Contents/MacOS/emu-live")
+        process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
+        transferProcess = process; cancelTransferButton.isHidden = false
+        transferProgress.isHidden = false; transferProgress.isIndeterminate = true; transferProgress.startAnimation(nil)
+        let monitor = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                if let self, let data = try? Data(contentsOf: progressURL), data.count < 4096,
+                   let report = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let sent = report["received"] as? Double, let total = report["total"] as? Double,
+                   total > 0, sent >= 0, sent <= total {
+                    self.transferProgress.stopAnimation(nil); self.transferProgress.isIndeterminate = false
+                    self.transferProgress.doubleValue = sent / total * 100
+                    self.status.stringValue = sent == total ? "Upload sent. Waiting for the player to verify and import the game…" :
+                        "Uploading ROM: \(Int(sent / total * 100))% — \(Int(sent / 1024)) / \(Int(total / 1024)) KB"
+                }
+                do { try await Task.sleep(nanoseconds: 200_000_000) } catch { break }
+            }
+        }
+        defer { monitor.cancel() }
+        defer { transferProcess = nil; cancelTransferButton.isHidden = true; transferProgress.stopAnimation(nil); transferProgress.isHidden = true }
+        status.stringValue = "Sending the ROM to the player. Waiting for verification and library import…"
+        try process.run()
+        try input.fileHandleForWriting.write(contentsOf: JSONSerialization.data(withJSONObject: config) + Data([10])); try input.fileHandleForWriting.close()
+        let result = await Task.detached(priority: .utility) { () -> (Int32, Data) in
+            let data = output.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit(); return (process.terminationStatus, data)
+        }.value
+        guard result.0 == 0 else {
+            let lines = String(data: result.1, encoding: .utf8)?.split(separator: "\n") ?? []
+            let response = lines.last.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+            throw fail(response?["error"] as? String ?? "ROM transfer cancelled or failed.")
+        }
+        let current = try await api(base, "GET", "v1/rooms/\(roomID)", nil, token: memberToken)
+        if let value = current["room"] as? [String: Any] { room = value; renderRoom() }
+        status.stringValue = "ROM received and imported by the player. You can now Start Game."
+    }
+    private func offerROMRequest() {
+        guard room?["role"] as? String == "host", !busy, gameProcess == nil,
+              let request = room?["rom_request"] as? [String: Any], request["status"] as? String == "pending",
+              let requestID = request["id"] as? String, !promptedROMRequests.contains(requestID),
+              panel.attachedSheet == nil, let base = activeEndpoint, let roomID = room?["id"] as? String else { return }
+        promptedROMRequests.insert(requestID)
+        let alert = NSAlert(); alert.messageText = "Send this ROM to the player?"
+        alert.informativeText = "\(request["username"] as? String ?? "Player 2") needs \(selectedROM?.game?.displayName ?? "the selected game") and has confirmed ownership. Send only if you are authorized to share this copy. The ROM is transferred and imported before you start the game. No game window opens during the transfer."
+        alert.addButton(withTitle: "Send ROM"); alert.addButton(withTitle: "Decline")
+        alert.beginSheetModal(for: panel) { [weak self] answer in
+            guard let self, self.room?["id"] as? String == roomID else { return }
+            let allow = answer == .alertFirstButtonReturn
+            self.perform {
+                _ = try await self.api(base, "POST", "v1/rooms/\(roomID)/rom-request", ["id": requestID, "allow": allow], token: self.memberToken)
+                if allow {
+                    self.shareROM.state = .on
+                    self.status.stringValue = "ROM request approved. Opening the transfer connection…"
+                    try await self.sendRequestedROM(base: base, roomID: roomID)
+                } else { self.status.stringValue = "ROM request declined. The player has been notified." }
+            }
         }
     }
     private func makeDirectoryTable(_ table: NSTableView, columns: [(String, String, CGFloat)]) -> NSScrollView {
@@ -860,7 +1325,10 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         return scroll
     }
     func numberOfRows(in tableView: NSTableView) -> Int { tableView === roomList ? listedRooms.count : relays.count }
-    func tableViewSelectionDidChange(_ notification: Notification) { refreshControls() }
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        if notification.object as? NSTableView === roomList, roomList.selectedRow >= 0 { invite.stringValue = "" }
+        refreshControls()
+    }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard let key = tableColumn?.identifier.rawValue else { return nil }
         let text: String
@@ -900,7 +1368,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         guard room == nil, gameProcess == nil, relays.indices.contains(relayPicker.indexOfSelectedItem), let address = relays[relayPicker.indexOfSelectedItem]["endpoint"] else { return }
         endpoint.stringValue = address
         defaults.set(address, forKey: prefix + "endpoint")
-        status.stringValue = "Hosting and invites will use the selected relay."
+        status.stringValue = "Relay fallback selected. Automatic connections still try direct play first."
     }
     @objc private func useSelectedRelay() {
         guard !busy, room == nil, gameProcess == nil, relays.indices.contains(relayTable.selectedRow) else { return }
@@ -908,7 +1376,10 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     }
     @objc private func registerRelay() { if let url = directoryURL { NSWorkspace.shared.open(url) } }
     @objc private func refreshDirectory() {
-        perform {
+        guard !directoryRefreshing else { return }
+        directoryRefreshing = true
+        Task { @MainActor in
+            defer { self.directoryRefreshing = false; self.refreshControls() }
             self.catalogMessage = ""
             if let directory = self.directoryURL {
                 do {
@@ -924,7 +1395,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                     self.relays = Array(valid.prefix(8)); self.rebuildRelayPicker()
                 } catch { self.catalogMessage = "Directory unavailable; showing the built-in or last loaded relays. " }
             }
-            self.listedRooms = []; self.relayStatus = [:]
+            var refreshedRooms: [[String: Any]] = []; self.relayStatus = [:]
             for relay in self.relays {
                 guard let address = relay["endpoint"], let base = URL(string: address) else { continue }
                 do {
@@ -933,14 +1404,19 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                     self.relayStatus[address] = "Online"
                     for var room in rooms where room["visibility"] as? String == "public" {
                         room["relay_endpoint"] = address; room["relay_name"] = relay["name"]
-                        self.listedRooms.append(room)
+                        refreshedRooms.append(room)
                     }
                 } catch { self.relayStatus[address] = "Unreachable" }
-                self.relayTable.reloadData(); self.roomList.reloadData()
+
             }
-            if !self.listedRooms.isEmpty { self.roomList.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }
+            let selected = self.listedRooms.indices.contains(self.roomList.selectedRow) ? self.listedRooms[self.roomList.selectedRow] : nil
+            self.listedRooms = refreshedRooms
+            self.relayTable.reloadData(); self.roomList.reloadData()
+            if let selected, let index = refreshedRooms.firstIndex(where: { $0["id"] as? String == selected["id"] as? String && $0["relay_endpoint"] as? String == selected["relay_endpoint"] as? String }) {
+                self.roomList.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+            }
             let offline = self.relayStatus.values.filter { $0 != "Online" }.count
-            self.status.stringValue = self.catalogMessage + "\(self.listedRooms.count) public game(s) across \(self.relays.count) relay(s)." + (offline > 0 ? " \(offline) relay(s) could not be reached." : "") + " Private rooms require an invite and the host’s relay."
+            if self.room == nil && !self.busy { self.status.stringValue = self.catalogMessage + "\(self.listedRooms.count) public game(s) across \(self.relays.count) relay(s)." + (offline > 0 ? " \(offline) relay(s) could not be reached." : "") + " Games update automatically every five seconds." }
         }
     }
     @objc private func updateHost() {
@@ -948,7 +1424,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         perform {
             let options = try self.hostOptions(newRoom: false); self.password.stringValue = ""
             let result = try await self.api(base, "POST", "v1/rooms/\(id)/settings", options, token: self.memberToken)
-            self.room = result["room"] as? [String: Any]; self.renderRoom()
+            self.room = result["room"] as? [String: Any]; self.hostOptionsDirty = false; self.renderRoom()
         }
     }
     @objc private func copyInvite() {
@@ -992,6 +1468,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         heartbeatTask?.cancel(); heartbeatTask = nil
         liveRoute = "connecting"; liveRTT = -1
         room = nil; memberToken = ""; activeEndpoint = nil
+        verifiedSHA = nil; romMatch.stringValue = ""
         renderRoom(); refreshControls()
     }
     private func selectedSTUN() throws -> [String]? {
@@ -1108,7 +1585,7 @@ private final class NetworkPlayLibraryBrowser: NSObject, NSTableViewDataSource, 
         list.heightAnchor.constraint(equalTo: columns.heightAnchor).isActive = true
         list.widthAnchor.constraint(equalTo: columns.widthAnchor, constant: -202).isActive = true
         let heading = NSTextField(labelWithString: "Your Library"); heading.font = .boldSystemFont(ofSize: 20)
-        let note = NSTextField(wrappingLabelWithString: "Browse your imported games by system. This preview supports Super Mario Kart NTSC v1.0 only; its file hash is checked before joining.")
+        let note = NSTextField(wrappingLabelWithString: "Browse your imported games by system. Untested games are marked ! in Network Play. The exact file hash is checked before joining.")
         note.textColor = .secondaryLabelColor
         choose.target = self; choose.action = #selector(confirm); choose.bezelStyle = .rounded
         let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelSelection)); cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
@@ -1271,4 +1748,8 @@ private final class NXSTUNProbe: @unchecked Sendable {
         let callback = completion; completion = nil
         callback?(result)
     }
+}
+
+private final class NXNetworkDocumentView: NSView {
+    override var isFlipped: Bool { true }
 }

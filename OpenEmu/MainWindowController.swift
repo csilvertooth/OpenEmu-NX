@@ -470,19 +470,19 @@ extension MainWindowController: NSWindowDelegate {
             let alert = NSAlert()
             alert.messageText = "What’s New in OpenEmu-NX \(version)"
             let content = NSTextField(wrappingLabelWithString: """
-            ROM hacks, with their own identity
-            Apply IPS, BPS and UPS patches without replacing your original game or saves. Other supported systems are experimental. Use Base Game Artwork adds a cover and mod-name overlay to already patched games.
+            A clearer Network Play window
+            Host and Join have stable layouts, separate game status, and prominent actions. Join by invite code or public listing, with direct connections preferred and relay fallback when needed.
 
-            Easier connections with friends
-            Choose a STUN service and use Check Network for connection guidance. Automatic connections prefer direct play and can fall back to a relay.
+            Share before you start
+            Players can request a matching ROM before gameplay, with host approval, progress, hash verification, and normal library import. Spectators cannot download games.
 
-            Optional player ROM downloads
-            Hosts can allow Player 2 to request the matching game. Players confirm ownership; downloads are hash-verified and imported using normal library placement. Spectators cannot download.
+            Organize your library
+            Collapse sidebar sections, favorite consoles, group by vendor or custom groups, and reorder items. Nintendo systems are grouped correctly.
 
-            Fixes and polish
-            Corrected helper launch failures and enlarged the Network Check results.
+            Small details that help
+            Centered navigation, clearer player and room name hints, and refreshed artwork after game imports.
 
-            Network Play remains a testing feature for Super Mario Kart NTSC v1.0 on Apple Silicon and macOS 14 or later. ROMs and BIOS files are not included.
+            SNES netplay remains experimental. Untested games and ROM hacks are identified in the interface; other emulator systems are not yet supported by the netplay runtime. ROMs and BIOS files are not included.
             """)
             content.font = .systemFont(ofSize: 13)
             content.preferredMaxLayoutWidth = 620

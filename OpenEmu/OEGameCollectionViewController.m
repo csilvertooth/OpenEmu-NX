@@ -517,6 +517,11 @@ static NSString * const OEGameTableSortDescriptorsKey = @"OEGameTableSortDescrip
     [self reloadDataIndexes:[self selectionIndexes]];
 }
 
+- (void)hostNetworkGame:(id)sender
+{
+    if(self.selectedGames.count == 1) [NetworkPlayController hostLibraryGame:self.selectedGames.firstObject];
+}
+
 - (void)useBaseGameArtwork:(id)sender
 {
     NSArray<OEDBGame *> *games = self.selectedGames;
@@ -816,6 +821,7 @@ static NSString * const OEGameTableSortDescriptorsKey = @"OEGameTableSortDescrip
             [menu addItemWithTitle:NSLocalizedString(@"Cancel Cover Art Download", @"") action:@selector(cancelCoverArtDownload:) keyEquivalent:@""];
 
         [menu addItemWithTitle:NSLocalizedString(@"Add Cover Art from File…", @"") action:@selector(addCoverArtFromFile:) keyEquivalent:@""];
+        [menu addItemWithTitle:@"Host Network Game…" action:@selector(hostNetworkGame:) keyEquivalent:@""];
         [menu addItemWithTitle:@"Use Base Game Artwork…" action:@selector(useBaseGameArtwork:) keyEquivalent:@""];
         [menu addItemWithTitle:NSLocalizedString(@"Import Artwork from Folder…", @"") action:@selector(importArtworkFromFolder:) keyEquivalent:@""];
         if(hasLocalFiles)

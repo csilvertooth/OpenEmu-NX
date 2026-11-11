@@ -22,12 +22,13 @@ typedef struct emu_frame {
     uint32_t audio_frames;
 } emu_frame;
 /* All calls on the same host thread; one lifetime per process (Snes9x globals).
-   ABI 1 profile: exact verified SMK NTSC v1.0 image, zero/factory SRAM,
+   ABI 1 general profile: SNES images, zero/factory SRAM,
    two joypads, no cheats/patches/sidecar media. ROM bytes are copied.
    Views expire on step, restore or destroy. Callers own snapshot buffers. */
 EMU_API uint32_t emu_runtime_abi(void);
 EMU_API const char *emu_runtime_profile(void);
 EMU_API int32_t emu_create(uint32_t abi, const uint8_t *rom, uint32_t length, emu_runtime **out);
+EMU_API uint32_t emu_frame_duration_us(emu_runtime *runtime);
 EMU_API void emu_destroy(emu_runtime *runtime);
 EMU_API int32_t emu_step(emu_runtime *runtime, uint16_t player1, uint16_t player2, emu_frame *out);
 EMU_API int32_t emu_state_size(emu_runtime *runtime, uint32_t *size);

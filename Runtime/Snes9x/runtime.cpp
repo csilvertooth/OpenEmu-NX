@@ -42,7 +42,7 @@ static void cleanup(emu_runtime *r) {
     if (r->memory) Memory.Deinit();
 }
 uint32_t emu_runtime_abi(void) { return EMU_RUNTIME_ABI; }
-const char *emu_runtime_profile(void) { return "snes9x-1.63-smk-ntsc-v1-abi1"; }
+const char *emu_runtime_profile(void) { return "snes9x-1.63-general-v2-abi1"; }
 int32_t emu_create(uint32_t abi, const uint8_t *rom, uint32_t length, emu_runtime **out) {
     if (!out) return EMU_ARGUMENT;
     *out = nullptr;
@@ -51,11 +51,6 @@ int32_t emu_create(uint32_t abi, const uint8_t *rom, uint32_t length, emu_runtim
     if (active) return EMU_BUSY;
     if (used) return EMU_RESTART_REQUIRED;
     if (length > 8u*1024u*1024u) return EMU_ROM;
-    const uint8_t expected[32] = {0x2a,0xda,0x89,0x19,0x68,0x80,0x87,0xbe,
-        0x60,0xa6,0xa4,0x8c,0xac,0xe8,0xf8,0x77,0xad,0xd6,0x0c,0x45,0xd2,0xe5,
-        0xd0,0x9e,0x24,0x42,0xfa,0xa5,0x5b,0xe6,0x2a,0x49};
-    uint8_t hash[32]; sha256sum(const_cast<uint8_t *>(rom), length, hash);
-    if (memcmp(hash, expected, 32)) return EMU_ROM;
     std::unique_ptr<emu_runtime> r;
     try {
         r.reset(new emu_runtime);
@@ -98,6 +93,7 @@ int32_t emu_create(uint32_t abi, const uint8_t *rom, uint32_t length, emu_runtim
         return EMU_OK;
     } catch (...) { if (r) cleanup(r.get()); return EMU_INTERNAL; }
 }
+uint32_t emu_frame_duration_us(emu_runtime *r) { return valid(r) && Settings.PAL ? 19997u : 16639u; }
 void emu_destroy(emu_runtime *r) {
     if (!r || r != active) return;
     cleanup(r); active = nullptr; delete r;

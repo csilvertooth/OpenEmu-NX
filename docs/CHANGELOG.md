@@ -1,3 +1,15 @@
+# 0.1.6 testing
+
+- Redesigned Network Play with Host, Join, Relays and Settings tabs, centered navigation, fixed player fields, a scrollable host list and compact game status.
+- Clearer Create Room, Start Game and Connect actions, with invite-code joining and player/room name placeholders.
+- Host-approved ROM transfers before gameplay, progress feedback, SHA-256 verification and library artwork refresh.
+- Collapsible sidebar sections, favorite consoles, vendor/custom grouping and drag ordering; corrected Nintendo grouping.
+- Updated first-launch What’s New notes.
+
+Validation: Release build and focused UI checks passed. Earlier two-Mac gameplay and pre-start transfer checks passed, with user-confirmed controls and audio. Drag reordering needs further hands-on testing because the UI automation could not perform the drag gesture. This release has not received a fresh full-game regression run.
+
+Apple Silicon Mac required. SNES netplay is experimental; untested games and ROM hacks are marked in the app. Other emulator systems are not supported by the netplay runtime yet. ROMs and BIOS files are not included.
+
 # OpenEmu-NX changes
 
 ## 0.1.5 testing

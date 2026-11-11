@@ -50,6 +50,7 @@ static NSDictionary *object(const Bytes &b){if(b.size()>131072)throw std::runtim
 @implementation NoRedirect
 -(void)URLSession:(NSURLSession*)s task:(NSURLSessionTask*)t willPerformHTTPRedirection:(NSHTTPURLResponse*)r newRequest:(NSURLRequest*)q completionHandler:(void(^)(NSURLRequest*))done {done(nil);}
 @end
+static void romProgress(NSString *phase,size_t received=0,size_t total=0);
 static NSDictionary *config;
 static NSURLSession *http;
 static std::atomic<int64_t> installedTURNExpiresAt{0};
@@ -292,10 +293,10 @@ int runSession(){@autoreleasepool{
  try{
   for(NSString *key in @[@"endpoint",@"room_id",@"token",@"rom"])if(![config[key] isKindOfClass:NSString.class])throw std::runtime_error("Missing launch setting");
   validateLobbyOrigin();
-  reportPath=str(config[@"report"]);bool headless=[config[@"headless"] boolValue];unsigned maxFrames=[config[@"frames"] unsignedIntValue];
+  reportPath=str(config[@"report"]);bool headless=[config[@"headless"] boolValue];bool serveROM=[config[@"serve_rom"] boolValue];unsigned maxFrames=[config[@"frames"] unsignedIntValue];
   NSURLSessionConfiguration *hc=NSURLSessionConfiguration.ephemeralSessionConfiguration;hc.URLCache=nil;hc.HTTPCookieStorage=nil;hc.URLCredentialStorage=nil;
   http=[NSURLSession sessionWithConfiguration:hc delegate:[NoRedirect new] delegateQueue:nil];
-  NSDictionary *admission=api(@"session",@"GET");std::string role=str(admission[@"room"][@"role"]);host=role=="host";bool watcher=role=="spectator";playback.setWatcher(watcher);
+  NSDictionary *admission=api(@"session",@"GET");std::string role=str(admission[@"room"][@"role"]);host=role=="host";if(serveROM && (!host || !headless))throw std::runtime_error("ROM serving requires a headless host");bool watcher=role=="spectator";playback.setWatcher(watcher);
   bool useRollback=!config[@"rollback"] || [config[@"rollback"] boolValue];rollbackPlayer=useRollback && !watcher;if(rollbackPlayer)playback.setRollbackPlayer();
   Bytes rom=readFile(str(config[@"rom"]));check(emu_create(EMU_RUNTIME_ABI,rom.data(),uint32_t(rom.size()),&core));uint32_t stateSize;check(emu_state_size(core,&stateSize));Bytes state(stateSize);
   auto stateHash=[&](){check(emu_state_copy(core,state.data(),stateSize));return hash(state);};
@@ -341,7 +342,7 @@ int runSession(){@autoreleasepool{
    SteamNetworkingUtils()->SetGlobalConfigValueInt32(k_ESteamNetworkingConfig_FakePacketLag_Send,int(lag));
    SteamNetworkingUtils()->SetGlobalConfigValueFloat(k_ESteamNetworkingConfig_FakePacketLoss_Send,float(loss));
   }
-  if(host && requestICE){api(@"launch",@"POST",@{@"transport":@"ice",@"route":ns(preference),@"delay":config[@"delay"]?:@3});launched=true;}
+  if(host && requestICE){api(@"launch",@"POST",@{@"transport":@"ice",@"route":ns(preference),@"delay":config[@"delay"]?:@3,@"purpose":serveROM?@"rom-transfer":@"game"});launched=true;}
   if(host && !requestICE){SteamNetworkingIPAddr address;address.Clear();for(int attempt=0;attempt<8 && !listener;attempt++){address.m_port=49152+arc4random_uniform(16384);listener=net->CreateListenSocketIP(address,7,opt);}if(!listener || !net->GetListenSocketAddress(listener,&address))throw std::runtime_error("Cannot listen for players");api(@"launch",@"POST",@{@"address":ns(localAddress()),@"port":@(address.m_port),@"delay":config[@"delay"]?:@3});launched=true;}
   // Waiting for the host is still an active membership. Renew before waiting
   // and every 15 seconds; otherwise a late start races the 60-second lease.
@@ -412,6 +413,8 @@ int runSession(){@autoreleasepool{
     if(signalWorker)signalWorker->stop();if(lobbyWorker)lobbyWorker->stop();}
    else{endWait=Clock::time_point{};
     admission=lobbyWorker->read();
+    if(serveROM && [admission[@"room"][@"rom_request"][@"status"] isEqual:@"received"])break;
+    if(serveROM && Clock::now()-preparationStarted>std::chrono::seconds(180))throw std::runtime_error("ROM transfer timed out before import completed");
     if(admission[@"session"]==(id)NSNull.null || ![admission[@"session"][@"id"] isEqual:ns(sessionID)])throw std::runtime_error("Host ended the game");
     if(signalWorker)signalWorker->poll(net,host);
    }
@@ -438,10 +441,11 @@ int runSession(){@autoreleasepool{
         Reader request{payload};size_t offset=request.get(4);request.end();
         if(offset!=peer.romOffset || offset>=rom.size())throw std::runtime_error("Invalid ROM chunk request");
         size_t length=std::min(SaveTransfer::chunkSize(),rom.size()-offset);
-        Bytes chunk;append(chunk,offset,4);chunk.insert(chunk.end(),rom.begin()+offset,rom.begin()+offset+length);mustSend(c,23,chunk);peer.romOffset+=length;
+        Bytes chunk;append(chunk,offset,4);chunk.insert(chunk.end(),rom.begin()+offset,rom.begin()+offset+length);mustSend(c,23,chunk);peer.romOffset+=length;romProgress(@"Uploading ROM…",peer.romOffset,rom.size());
        }
        continue;
       }
+      if(serveROM)throw std::runtime_error("ROM transfer is in progress; wait for the host to Start Game");
       if(peer.transferringROM)throw std::runtime_error("ROM transfer must finish before gameplay reconnects");
       if(type==1 && host && !peer.authenticated){NSDictionary *h=object(payload);if(![h[@"stream_version"] isEqual:@8] || ![h[@"session"] isEqual:ns(sessionID)] || ![h[@"compatibility"] isEqual:compat])throw std::runtime_error("Incompatible peer");std::string key=str(h[@"key"]),claimed=str(h[@"role"]);if(claimed=="guest" && ![h[@"netcode"] isEqual:useRollback?@"rollback-v3":@"delay-v2"])throw std::runtime_error("Player netcode differs; update both Macs");bool allowed=false;for(NSDictionary *p in admission[@"peers"])if(str(p[@"key"])==key && str(p[@"role"])==claimed)allowed=true;
        if(!allowed || (claimed!="guest" && claimed!="spectator"))throw std::runtime_error("Unadmitted peer");for(auto &[other,p]:peers)if(other!=c && p.authenticated && p.key==key)throw std::runtime_error("Duplicate peer");
@@ -526,7 +530,7 @@ int runSession(){@autoreleasepool{
      auto elapsed=std::chrono::duration_cast<std::chrono::nanoseconds>(lastStep-coreStart).count();coreNS+=elapsed;maxCoreNS=std::max(maxCoreNS,uint64_t(elapsed));
      // Deadlines advance from the previous deadline, not from work completion.
      // After a long stall, avoid an unbounded catch-up burst.
-     const auto interval=std::chrono::microseconds(16639);pace+=interval;
+     const auto interval=std::chrono::microseconds(emu_frame_duration_us(core));pace+=interval;
      if(progress-pace>interval*4){pace=progress+interval;++pacingResets;}
      if(frame>1)sessionFPS=(frame-1)/std::chrono::duration<double>(lastStep-firstStep).count();
      lastW=output.width;lastH=output.height;lastPixels.resize(lastW*lastH*2);for(unsigned y=0;y<lastH;y++)memcpy(lastPixels.data()+y*lastW*2,output.video+y*output.pitch,lastW*2);lastVideo=hash(lastPixels);
@@ -558,6 +562,13 @@ int runSession(){@autoreleasepool{
 
 // Download before normal gameplay admission. The frontend supplies a new local
 // destination, never a peer-controlled path. No emulator sees unverified bytes.
+static void romProgress(NSString *phase,size_t received,size_t total){
+ if(![config[@"rom_transfer_progress"] isKindOfClass:NSString.class])return;
+ static auto last=Clock::time_point{};auto now=Clock::now();
+ if(total && received<total && now-last<std::chrono::milliseconds(100))return;last=now;
+ NSData *data=[NSJSONSerialization dataWithJSONObject:@{@"phase":phase,@"received":@(received),@"total":@(total)} options:0 error:nil];
+ [data writeToFile:config[@"rom_transfer_progress"] options:NSDataWritingAtomic error:nil];
+}
 static int receiveROM(){@autoreleasepool{
  std::unique_ptr<SignalWorker> signalsWorker;std::unique_ptr<LobbyWorker> lobby;
  try {
@@ -571,8 +582,16 @@ static int receiveROM(){@autoreleasepool{
   NSDictionary *compat=admission[@"room"][@"compatibility"];
   if(![compat[@"rom_sha256"] isEqual:config[@"expected_rom_sha256"]])throw std::runtime_error("Room ROM SHA-256 changed");
   const auto deadline=Clock::now()+std::chrono::seconds(180);auto heartbeat=Clock::now();
-  while(![admission[@"session"] isKindOfClass:NSDictionary.class]){
-   if(closeRequested() || Clock::now()>deadline)throw std::runtime_error("Timed out waiting for host to Start Game");
+  auto approved=[&](){
+   if(![config[@"require_rom_approval"] boolValue])return true;
+   NSString *decision=admission[@"room"][@"rom_request"][@"status"];
+   if([decision isEqual:@"declined"])throw std::runtime_error("The host declined the ROM request.");
+   return [decision isEqual:@"approved"];
+  };
+  romProgress(@"Waiting for host approval…");
+  while(!approved() || ![admission[@"session"] isKindOfClass:NSDictionary.class]){
+   romProgress(approved()?@"Host approved. Waiting for the transfer connection…":@"Waiting for host approval…");
+   if(closeRequested() || Clock::now()>deadline)throw std::runtime_error("Timed out waiting for the host to approve and send the ROM");
    if(Clock::now()>=heartbeat){api(@"heartbeat",@"POST",@{});heartbeat=Clock::now()+std::chrono::seconds(15);}
    std::this_thread::sleep_for(std::chrono::seconds(1));admission=api(@"session",@"GET");
   }
@@ -594,7 +613,8 @@ static int receiveROM(){@autoreleasepool{
   auto mailbox=std::make_shared<SignalMailbox>();signalsWorker=std::make_unique<SignalWorker>(mailbox,sessionID,[admission[@"signaling_request_ids"] isEqual:@YES]);lobby=std::make_unique<LobbyWorker>(admission);
   SteamNetworkingIdentity remote;remote.Clear();if(!remote.ParseString([admission[@"host_identity"] UTF8String]))throw std::runtime_error("Invalid host identity");
   server=net->ConnectP2PCustomSignaling(new LobbySignaler(mailbox,str(admission[@"host_identity"])),&remote,0,0,nullptr);if(!server)throw std::runtime_error("Cannot connect to host for ROM transfer");peers[server]={};
-  bool requested=false,offered=false;SaveTransfer transfer;
+  romProgress(@"Connecting to the host…");
+  size_t transferTotal=0;bool requested=false,offered=false;SaveTransfer transfer;
   while(!transfer.complete()){@autoreleasepool{
    if(closeRequested() || Clock::now()>deadline)throw std::runtime_error("ROM transfer cancelled or timed out");
    admission=lobby->read();if(![admission[@"session"] isKindOfClass:NSDictionary.class] || ![admission[@"session"][@"id"] isEqual:ns(sessionID)])throw std::runtime_error("Host ended the session");
@@ -606,13 +626,14 @@ static int receiveROM(){@autoreleasepool{
     if(type==24){id reason=object(payload)[@"error"];throw std::runtime_error([reason isKindOfClass:NSString.class] && [reason length]<=512?str(reason):"Host refused ROM transfer");}
     if(type==21 && !offered){NSDictionary *offer=object(payload);if(![offer[@"bytes"] isKindOfClass:NSNumber.class])throw std::runtime_error("Invalid ROM byte count");auto count=[offer[@"bytes"] unsignedLongLongValue];
      if(![offer[@"key"] isEqual:admission[@"host_key"]] || ![offer[@"session"] isEqual:ns(sessionID)] || ![offer[@"sha256"] isEqual:config[@"expected_rom_sha256"]] || !count || count>SaveJournal::MaxBytes)throw std::runtime_error("Invalid ROM offer or SHA-256 mismatch");
-     transfer.begin(size_t(count),expected);offered=true;
-    }else if(type==23 && offered){Reader reader{payload};size_t offset=reader.get(4);if(offset!=transfer.received())throw std::runtime_error("Unexpected ROM chunk offset");transfer.put(offset,Bytes(payload.begin()+4,payload.end()));}
+     transferTotal=size_t(count);transfer.begin(transferTotal,expected);offered=true;romProgress(@"Downloading ROM…",0,transferTotal);
+    }else if(type==23 && offered){Reader reader{payload};size_t offset=reader.get(4);if(offset!=transfer.received())throw std::runtime_error("Unexpected ROM chunk offset");transfer.put(offset,Bytes(payload.begin()+4,payload.end()));romProgress(@"Downloading ROM…",transfer.received(),transferTotal);}
     else throw std::runtime_error("Unexpected ROM transfer message");
     if(!transfer.complete()){Bytes request;append(request,transfer.received(),4);mustSend(server,22,request);}
    }
    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }}
+  romProgress(@"Verifying the downloaded ROM…");
   const auto &bytes=transfer.finish(); // mandatory full SHA-256 before any disk write
   NSError *writeError=nil;NSData *data=[NSData dataWithBytes:bytes.data() length:bytes.size()];
   if(![data writeToFile:config[@"receive_rom"] options:NSDataWritingWithoutOverwriting error:&writeError])throw std::runtime_error("Cannot write received ROM without replacing an existing file");

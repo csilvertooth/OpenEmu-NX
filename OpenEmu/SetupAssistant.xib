@@ -338,15 +338,14 @@ This setup will install the system cores you need to start playing. Cores are mo
                                     <rect key="frame" x="17" y="156" width="383" height="56"/>
                                     <textFieldCell key="cell" controlSize="small" sendsActionOnEndEditing="YES" state="on" id="402">
                                         <font key="font" metaFont="smallSystem"/>
-                                        <string key="title">Classic games. Together. — 0.1.5
+                                        <string key="title">Classic games. Together. — 0.1.6
 
-• ROM hacks — apply IPS, BPS and UPS patches safely.
-• Mod artwork — reuse a base game’s cover with a custom label.
-• Network Check — STUN options and connection guidance.
-• Player downloads — optional, hash-verified ROM sharing.
-• Helper launch fixes and a wider network results window.
+• Clearer Host and Join layouts and game status.
+• Host-approved player downloads before gameplay.
+• Favorites, vendor groups and collapsible sidebar sections.
+• Player and room name hints and artwork fixes.
 
-Network Play supports Super Mario Kart NTSC v1.0.
+SNES netplay is experimental; untested games are marked.
 ROMs and BIOS files are not included.</string>
                                         <color key="textColor" name="labelColor" catalog="System" colorSpace="catalog"/>
                                         <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
