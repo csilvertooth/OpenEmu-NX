@@ -1,0 +1,16 @@
+OpenEmu-NX
+Copyright (c) 2026 Chris Silvertooth, for original OpenEmu-NX contributions.
+https://github.com/csilvertooth/OpenEmu-NX
+
+OpenEmu-NX is derived from OpenEmu-Silicon and OpenEmu:
+https://github.com/OpenEmu-Silicon/OpenEmu-Silicon
+https://github.com/OpenEmu/OpenEmu
+
+Please credit Chris Silvertooth / OpenEmu-NX, OpenEmu-Silicon, and OpenEmu
+when forking, redistributing, or building on this project.
+
+Original copyright notices, contributor credits, and licenses are preserved.
+Emulator cores and other dependencies retain their respective licenses.
+See LICENSE, docs/THIRD_PARTY.md, docs/UPSTREAM_CREDITS.md, and the license
+files distributed with each component. This notice requests attribution;
+it does not replace or add restrictions to those licenses.
