@@ -1625,6 +1625,9 @@ final class NXUpdaterController: NSObject {
               let key = bundle.object(forInfoDictionaryKey: "SUPublicEDKey") as? String,
               Data(base64Encoded: key)?.count == 32,
               key != "wVICc/NGoDFzkEbDb63QMFpKlRs14e/WhIiwIngQGsg=" else { return }
+        // Legacy OpenEmu preferences can contain a feed override. Always use
+        // this fork’s validated bundled feed instead of an imported channel.
+        UserDefaults.standard.removeObject(forKey: "SUFeedURL")
         controller = SPUStandardUpdaterController(startingUpdater: true,
                                                  updaterDelegate: nil, userDriverDelegate: nil)
     }
