@@ -7,6 +7,16 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <description>Signed OpenEmu-NX testing releases.</description>
     <language>en</language>
     <item>
+      <title>OpenEmu-NX 0.1.6</title>
+      <link>https://github.com/csilvertooth/OpenEmu-NX/releases/tag/v0.1.6</link>
+      <sparkle:version>45</sparkle:version>
+      <sparkle:shortVersionString>0.1.6</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <pubDate>Wed, 11 Nov 2026 22:21:57 +0000</pubDate>
+      <description>Refined Network Play layouts, pre-start player transfers, library sidebar organization, artwork refresh and clearer name prompts.</description>
+      <enclosure url="https://github.com/csilvertooth/OpenEmu-NX/releases/download/v0.1.6/OpenEmu-NX-0.1.6.dmg" length="52438163" type="application/octet-stream" sparkle:edSignature="X9Jzxe0XZfxHb/hSe/LfH1jp8IgLRYh9MmY+nR5OfPgja4lhvKkhO1yxKmNPCTEgrTo04iy05IFZ4TB+9TAADA=="></enclosure>
+    </item>
+    <item>
       <title>OpenEmu-NX 0.1.5</title>
       <link>https://github.com/csilvertooth/OpenEmu-NX/releases/tag/v0.1.5</link>
       <sparkle:version>32</sparkle:version>
@@ -28,6 +38,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: qhnVKJyVdHrRnOXqXACjcTP32gqFbuadBaL8Y3iOAAiLyPdLcwqxcJ6iqQ9v1fFRZENAHIH76q6Ja8Nbi5fdBQ==
-length: 2402
+edSignature: bq8DVugwg0iWDD0tVkZ/aJFQhiqDhxPX2y3E+je5ECSJznneHypmY33IF6moRDNECEqNPqn4WrG4VdNOn80iCQ==
+length: 3236
 -->
