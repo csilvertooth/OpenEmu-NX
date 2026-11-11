@@ -2,7 +2,7 @@
 
 **Classic games. Together.**
 
-OpenEmu-NX is a Mac-first netplay fork of [OpenEmu-Silicon](https://github.com/OpenEmu-Silicon/OpenEmu-Silicon), built on [OpenEmu](https://github.com/OpenEmu/OpenEmu). It keeps the imported game library and native Mac interface while adding shared play.
+OpenEmu-NX is a Mac-first "netplay" like fork of [OpenEmu-Silicon](https://github.com/OpenEmu-Silicon/OpenEmu-Silicon), built on [OpenEmu](https://github.com/OpenEmu/OpenEmu). It keeps the imported game library and native Mac interface while adding shared play.
 
 This is an early testing release. Network Play currently supports **two-player Super Mario Kart NTSC v1.0**, with each player providing their own matching game file. Local emulation retains the upstream core architecture; Network Play uses a separate portable Snes9x runtime. Broader core support does not imply netplay support for those systems.
 
