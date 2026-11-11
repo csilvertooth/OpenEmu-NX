@@ -128,7 +128,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.7-beta.1</string>
+	<string>0.1.7-beta.2</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -141,7 +141,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>47</string>
+	<string>48</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
 	<key>LSMinimumSystemVersion</key>
@@ -174,7 +174,7 @@
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>NXRelayDirectoryURL</key>
-	<string>https://97s93wu2jc.execute-api.us-west-2.amazonaws.com</string>
+	<string>https://lobby.azimuthsystems.net</string>
 	<key>NXRepositoryURL</key>
 	<string>https://github.com/csilvertooth/OpenEmu-NX</string>
 	<key>NXUpdateFeedHosts</key>
@@ -218,7 +218,7 @@
 		</dict>
 	</array>
 	<key>NXCentralLobbyURL</key>
-	<string>https://97s93wu2jc.execute-api.us-west-2.amazonaws.com</string>
+	<string>https://lobby.azimuthsystems.net</string>
 	<key>NXRoomEventsURL</key>
 	<string>wss://4pu04v70dk.execute-api.us-west-2.amazonaws.com/live</string>
 </dict>

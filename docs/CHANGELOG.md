@@ -1,3 +1,8 @@
+## 0.1.7-beta.2
+
+- Stable lobby address: https://lobby.azimuthsystems.net.
+- Automatically migrate the previous default AWS address; preserve custom lobby settings.
+
 ## 0.1.7-beta.1
 
 - Central Lambda lobby for rooms, invites and approved relay registration; relay servers carry TURN traffic.

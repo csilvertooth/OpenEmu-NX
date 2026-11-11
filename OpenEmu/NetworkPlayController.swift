@@ -276,9 +276,10 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         panel.center()
         name.stringValue = defaults.string(forKey: prefix + "displayName") ?? ""
         hostName.stringValue = name.stringValue
-        let central = Bundle.main.object(forInfoDictionaryKey: "NXCentralLobbyURL") as? String ?? "https://netplay.azimuthsystems.net"
+        let central = Bundle.main.object(forInfoDictionaryKey: "NXCentralLobbyURL") as? String ?? "https://lobby.azimuthsystems.net"
         let savedEndpoint = defaults.string(forKey: prefix + "endpoint")
-        endpoint.stringValue = savedEndpoint == nil || savedEndpoint == "https://netplay.azimuthsystems.net" ? central : savedEndpoint!
+        let retiredDefaults = ["https://netplay.azimuthsystems.net", "https://97s93wu2jc.execute-api.us-west-2.amazonaws.com"]
+        endpoint.stringValue = savedEndpoint == nil || retiredDefaults.contains(savedEndpoint!.trimmingCharacters(in: CharacterSet(charactersIn: "/"))) ? central : savedEndpoint!
         defaults.set(endpoint.stringValue, forKey: prefix + "endpoint")
         route.addItems(withTitles: ["Automatic (direct or relay)", "Direct only", "Relay only"])
         // Earlier test builds persisted Relay only. New sessions prefer direct ICE.

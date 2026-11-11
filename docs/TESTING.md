@@ -20,6 +20,8 @@ In Settings → Cores, use Show to enable or hide the supported systems in the l
 
 Resume Multiplayer Game opens the multiplayer-save folder inside the configured application data folder. Existing OpenEmu data is copied during migration; custom library locations remain supported. Fork maintainers can configure the application data folder as described in [Fork data configuration](fork-data-configuration.md). Verify a clean first launch and an existing-library migration separately before distributing a build.
 
+The default lobby is **https://lobby.azimuthsystems.net**. Beta 2 migrates the previous default automatically; custom servers remain unchanged.
+
 ## Relay registration
 
 Open Network Play → Relays and use the registration action to submit a relay name, region, hostname and operator contact. Registration is reviewed before listing; submitting a form does not automatically publish a relay. Do not put TURN secrets or server credentials in the form. The operator completes private service configuration after review.
