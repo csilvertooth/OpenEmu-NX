@@ -7,6 +7,16 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <description>Signed OpenEmu-NX testing releases.</description>
     <language>en</language>
     <item>
+      <title>OpenEmu-NX 0.1.5</title>
+      <link>https://github.com/csilvertooth/OpenEmu-NX/releases/tag/v0.1.5</link>
+      <sparkle:version>32</sparkle:version>
+      <sparkle:shortVersionString>0.1.5</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <pubDate>Wed, 11 Nov 2026 18:22:59 +0000</pubDate>
+      <description>ROM hacks and artwork, helper launch fixes, direct-first networking diagnostics, and optional player ROM transfers through the normal library importer. Updated What's New appears once after updating.</description>
+      <enclosure url="https://github.com/csilvertooth/OpenEmu-NX/releases/download/v0.1.5/OpenEmu-NX-0.1.5.dmg" length="51908221" type="application/octet-stream" sparkle:edSignature="xba8ufw6kq6ZRy88pH3KSirciDmpiKvKZ2eD/VlcQjtCHlxLUU/7gxy2akEERLeqsWsf41C2nPlbl1ZrsbciCw=="></enclosure>
+    </item>
+    <item>
       <title>OpenEmu-NX 0.1.4</title>
       <link>https://github.com/csilvertooth/OpenEmu-NX/releases/tag/v0.1.4</link>
       <sparkle:version>27</sparkle:version>
@@ -18,6 +28,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: Aqeca7IwXhGiFEx7U7UnP/AgvD9HKmVKhJK53atdijP062bgsg4916b7ty7nHaff/TeFpyxX/vAuKovh7sPBCg==
-length: 1498
+edSignature: qhnVKJyVdHrRnOXqXACjcTP32gqFbuadBaL8Y3iOAAiLyPdLcwqxcJ6iqQ9v1fFRZENAHIH76q6Ja8Nbi5fdBQ==
+length: 2402
 -->
