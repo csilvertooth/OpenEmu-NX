@@ -58,4 +58,10 @@ Preserve licenses and copyright headers, make focused changes, and test the beha
 
 ## Credits and licenses
 
+If you fork, redistribute, or build on this project, please credit **Chris Silvertooth / OpenEmu-NX**, **OpenEmu-Silicon**, and **OpenEmu**, and link to their project repositories. Preserve the applicable license notices and contributor credits for the emulator cores and other dependencies as well. This attribution request does not replace or add restrictions to the existing component licenses.
+
+- [Chris Silvertooth / OpenEmu-NX](https://github.com/csilvertooth/OpenEmu-NX)
+- [OpenEmu-Silicon](https://github.com/OpenEmu-Silicon/OpenEmu-Silicon)
+- [OpenEmu](https://github.com/OpenEmu/OpenEmu)
+
 OpenEmu-NX depends on extensive work by the OpenEmu, OpenEmu-Silicon, emulator-core and networking communities. [THIRD_PARTY.md](docs/THIRD_PARTY.md) identifies the major projects; [upstream credits](docs/UPSTREAM_CREDITS.md) preserve the inherited acknowledgments. The root [LICENSE](LICENSE) covers the frontend where applicable. Components retain their own licenses; there is no single license for the whole tree. Some cores have non-commercial restrictions.
