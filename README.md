@@ -22,7 +22,7 @@ The current network helper requires an Apple Silicon Mac on macOS 14 or newer. R
 
 See [testing and network play](docs/TESTING.md), [build instructions](docs/BUILDING.md), and [architecture](docs/ARCHITECTURE.md). Release packages, when published, will appear under [OpenEmu-NX Releases](https://github.com/csilvertooth/OpenEmu-NX/releases).
 
-Automatic app updates remain disabled until this project's own signed update feed is ready. Core updates use their existing upstream channels. Do not install an unsigned app update from a third-party mirror.
+Starting with 0.1.4, the app checks this repository's signed update feed. Downloads and feed metadata are verified with the NX public key; installation asks for confirmation by default. Builds through 0.1.3 need a one-time manual installation. Core updates use their existing upstream channels. See [update publishing](docs/UPDATES.md).
 
 ## Data and preferences
 

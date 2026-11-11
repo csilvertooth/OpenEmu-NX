@@ -1,6 +1,13 @@
 # OpenEmu-NX changes
 
-## 0.1.3 development
+## 0.1.4 testing
+
+- Enable GitHub-hosted app updates with NX-owned Ed25519 signatures for both the feed and installer.
+- Check automatically and prompt before installing by default.
+- Require valid signatures before extracting downloads; reject invalid or unsigned feeds.
+- Builds through 0.1.3 require this update to be installed manually once.
+
+## 0.1.3 testing
 
 - Select a joining player's imported game by the host's SHA-256, with an explicit mismatch explanation.
 - Use Automatic/direct-first transport for invite joins, with relay fallback.

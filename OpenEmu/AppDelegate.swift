@@ -1606,8 +1606,8 @@ extension AppDelegate: NSMenuDelegate {
 }
 
 
-/// Preview builds must never replace the fork with an upstream application update.
-/// Enable only after publishing our signed appcast and installing its public key.
+/// App updates use the fork’s configured feed and EdDSA key.
+/// Core updates retain their independent upstream channels.
 @MainActor
 @objc(NXUpdaterController)
 final class NXUpdaterController: NSObject {

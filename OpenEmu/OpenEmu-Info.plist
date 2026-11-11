@@ -128,7 +128,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.3</string>
+	<string>0.1.4</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -141,7 +141,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>26</string>
+	<string>27</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
 	<key>LSMinimumSystemVersion</key>
@@ -184,11 +184,21 @@
 		<string>raw.githubusercontent.com</string>
 	</array>
 	<key>NXUpdatesEnabled</key>
-	<false/>
+	<true/>
 	<key>SUFeedURL</key>
-	<string></string>
+	<string>https://raw.githubusercontent.com/csilvertooth/OpenEmu-NX/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string></string>
+	<string>wpvEDYGZ6UEvPbixifuhic8xYM3kAgQDB7sluc3qH48=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SURequireSignedFeed</key>
+	<true/>
+	<key>SUSignedFeedFailureExpirationInterval</key>
+	<integer>0</integer>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
