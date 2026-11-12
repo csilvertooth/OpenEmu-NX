@@ -3,6 +3,9 @@ import Cocoa
 import CoreData
 import Network
 import QuartzCore
+import Darwin
+import OpenEmuSystem
+import OpenEmuBase
 
 private final class NetworkPlayNoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -39,6 +42,85 @@ private struct NetworkPlayProgress: Sendable {
                                    networkRoute: object["network_route"] as? String ?? "connecting",
                                    networkRTT: (object["network_rtt_ms"] as? NSNumber)?.intValue ?? -1)
     }
+}
+
+// Network input uses the same responder and live bindings as local emulation.
+// Local player one is mapped to this machine's negotiated network slot.
+private final class NetworkInputResponder: OESystemResponder, OESystemResponderClient, OESystemBindingsObserver {
+    private var bindings: OESystemBindings?
+    private var monitor: Any?
+    private var memory: UnsafeMutableRawPointer?
+    private var mask: UInt32 = 0
+    private var frameCallback: ((TimeInterval) -> Void)?
+    private var timer: Timer?
+    let inputURL: URL
+
+    init(system: OESystemController) throws {
+        inputURL = FileManager.default.temporaryDirectory.appendingPathComponent("nx-input-" + UUID().uuidString)
+        super.init(controller: system)
+        let fd = Darwin.open(inputURL.path, O_RDWR | O_CREAT | O_EXCL, 0o600)
+        guard fd >= 0 else { throw CocoaError(.fileWriteUnknown) }
+        defer { Darwin.close(fd) }
+        guard ftruncate(fd, 516) == 0 else { throw CocoaError(.fileWriteUnknown) }
+        let ptr = mmap(nil, 516, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)
+        guard ptr != MAP_FAILED, let ptr else { throw CocoaError(.fileWriteUnknown) }
+        memory = ptr; ptr.initializeMemory(as: UInt8.self, repeating: 0, count: 516)
+        client = self
+        bindings = OEBindingsController.default.systemBindings(for: system)
+        bindings?.add(self)
+        monitor = OEDeviceManager.shared.addGlobalEventMonitorHandler { [weak self] _, event in
+            if event.type.rawValue != 4 { self?.handle(event) }
+            return true
+        }
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            self?.frameCallback?(1.0 / 60)
+        }
+    }
+    required init?(coder: NSCoder) { fatalError("Not used") }
+    func stop() {
+        timer?.invalidate(); timer = nil
+        if let monitor { OEDeviceManager.shared.removeMonitor(monitor) }; monitor = nil
+        bindings?.remove(self); bindings = nil
+        if let memory { memory.storeBytes(of: UInt32(0), as: UInt32.self); munmap(memory, 516) }; memory = nil
+        try? FileManager.default.removeItem(at: inputURL)
+    }
+    override func pressEmulatorKey(_ key: OESystemKey) {
+        guard key.player == 1, key.key < 12 else { return }
+        mask |= UInt32(1) << key.key; memory?.storeBytes(of: mask, as: UInt32.self)
+    }
+    override func releaseEmulatorKey(_ key: OESystemKey) {
+        guard key.player == 1, key.key < 12 else { return }
+        mask &= ~(UInt32(1) << key.key); memory?.storeBytes(of: mask, as: UInt32.self)
+    }
+    func systemBindings(_ sender: OESystemBindings, didSetEvent event: OEHIDEvent, forBinding binding: OEBindingDescription, playerNumber: UInt) {
+        if event.type.rawValue == 4 {
+            if playerNumber == 1, let key = binding as? OEKeyBindingDescription,
+               key.index < 12, event.virtualKeyCode < 128 {
+                memory?.storeBytes(of: UInt32(1) << key.index, toByteOffset: 4 + Int(event.virtualKeyCode) * 4, as: UInt32.self)
+            }
+            return
+        }
+        systemBindingsDidSetEvent(event, forBinding: binding, playerNumber: playerNumber)
+    }
+    func systemBindings(_ sender: OESystemBindings, didUnsetEvent event: OEHIDEvent, forBinding binding: OEBindingDescription, playerNumber: UInt) {
+        mask = 0; memory?.storeBytes(of: mask, as: UInt32.self)
+        if event.type.rawValue == 4 {
+            if playerNumber == 1, event.virtualKeyCode < 128 {
+                memory?.storeBytes(of: UInt32(0), toByteOffset: 4 + Int(event.virtualKeyCode) * 4, as: UInt32.self)
+            }
+            return
+        }
+        systemBindingsDidUnsetEvent(event, forBinding: binding, playerNumber: playerNumber)
+    }
+    func perform(_ block: @escaping () -> Void) { block() }
+    func setFrameCallback(_ block: @escaping (TimeInterval) -> Void) { frameCallback = block }
+    func fastForward(_ flag: Bool) {}
+    func fastForward(atSpeed speed: CGFloat) {}
+    func rewind(_ flag: Bool) {}
+    func rewind(atSpeed speed: CGFloat) {}
+    func slowMotion(atSpeed speed: CGFloat) {}
+    func stepFrameForward() {}
+    func stepFrameBackward() {}
 }
 
 @MainActor
@@ -124,6 +206,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     private var resumeURL: URL?
     private var currentAutosaveURL: URL?
     private var gameProcess: Process?
+    private var networkInput: NetworkInputResponder?
     private var gameStopping = false
     private var lastGameError: String?
     private var gameMessage: String?
@@ -686,6 +769,11 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                 self.currentAutosaveURL = autosave; config["autosave_path"] = autosave.path
                 if let resume = self.resumeURL { config["resume_path"] = resume.path }
             }
+            guard let system = rom.game?.system?.plugin?.controller else { throw CocoaError(.fileReadUnknown) }
+            let controls = try NetworkInputResponder(system: system)
+            var launched = false
+            defer { if !launched { controls.stop() } }
+            config["input_state_path"] = controls.inputURL.path
             var bytes = try JSONSerialization.data(withJSONObject: config); bytes.append(10)
             process.terminationHandler = { [weak self] task in
                 let data = output.fileHandleForReading.readDataToEndOfFile()
@@ -698,6 +786,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                 Task { @MainActor in
                     guard let self, self.gameProcess === task else { return }
                     self.cancelProgress()
+                    self.networkInput?.stop(); self.networkInput = nil
                     self.gameProcess = nil; self.gameStopping = false; self.gameConnected = false
                     self.lastGameError = finalError ?? self.lastGameError
                     self.gameMessage = self.lastGameError ?? message
@@ -706,6 +795,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             }
             self.gameMessage = nil; self.gameStopping = false; self.lastGameError = nil; self.gameConnected = false
             try process.run(); self.gameProcess = process
+            self.networkInput = controls; launched = true
             input.fileHandleForWriting.write(bytes); try? input.fileHandleForWriting.close()
             self.gameMessage = "Opening network game. Waiting for the other player…"
             self.status.stringValue = self.gameMessage!

@@ -5,6 +5,10 @@
 #import <QuartzCore/QuartzCore.h>
 #include <mach/mach_time.h>
 #include <signal.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <steam/steamnetworkingsockets.h>
 #include <steam/isteamnetworkingutils.h>
 #include <openssl/sha.h>
@@ -138,6 +142,17 @@ static std::string connectionFailure;
 static std::atomic<int> selectedRoute{0},networkRTT{-1};
 static std::atomic<double> networkQuality{1};
 static uint16_t keys=0;
+static const uint32_t *mappedInput=nullptr;
+static std::set<unsigned> pressedKeys;
+static std::mutex connectingMutex;
+static std::string connectingStage="Contacting lobby…", connectingPlayers;
+static void connecting(const char *stage){std::lock_guard<std::mutex> lock(connectingMutex);connectingStage=stage;}
+static void participants(NSDictionary *room){
+ NSMutableArray *lines=[NSMutableArray array];
+ for(NSString *key in @[@"host_name",@"guest_name"]){id name=room[key];if([name isKindOfClass:NSString.class] && [name length])[lines addObject:[NSString stringWithFormat:@"%@ — in room",name]];}
+ if([room[@"watcher_names"] isKindOfClass:NSArray.class] && [room[@"watcher_names"] count])[lines addObject:[NSString stringWithFormat:@"Spectators: %@",[room[@"watcher_names"] componentsJoinedByString:@", "]]];
+ std::lock_guard<std::mutex> lock(connectingMutex);connectingPlayers=str([lines componentsJoinedByString:@"\n"]);
+}
 static std::atomic<bool> closing{false};
 static volatile sig_atomic_t terminationRequested=0;
 static void requestTermination(int){terminationRequested=1;}
@@ -184,10 +199,33 @@ static void presentFrame(const Bytes &pixels,unsigned width,unsigned height,unsi
 @implementation GameView
 -(BOOL)acceptsFirstResponder{return YES;}
 -(void)drawRect:(NSRect)rect{[NSColor.blackColor setFill];NSRectFill(self.bounds);if(_picture){CGFloat scale=MIN(self.bounds.size.width/_picture.size.width,self.bounds.size.height/_picture.size.height);NSSize size=NSMakeSize(_picture.size.width*scale,_picture.size.height*scale);NSRect dst=NSMakeRect((self.bounds.size.width-size.width)/2,(self.bounds.size.height-size.height)/2,size.width,size.height);NSGraphicsContext.currentContext.imageInterpolation=NSImageInterpolationNone;[_picture drawInRect:dst];if(_sourceFrame!=_lastDrawnFrame){double now=std::chrono::duration<double>(Clock::now().time_since_epoch()).count();if(_drawnFrames){double gap=now-_lastDraw;_maximumDrawGap=MAX(_maximumDrawGap,gap);/* The first picture precedes audio prebuffering. */if(_drawnFrames>1){_maximumPlaybackDrawGap=MAX(_maximumPlaybackDrawGap,gap);if(gap>0.050)++_playbackDrawStalls;if(gap>0.025)++_playbackMicrostutters;}}else _firstDraw=now;_lastDraw=now;_lastDrawnFrame=_sourceFrame;++_drawnFrames;}}}
--(void)setKey:(NSEvent*)event down:(BOOL)down{const unsigned codes[]={126,125,123,124,7,6,1,0,12,13,36,48};for(unsigned i=0;i<12;i++)if(event.keyCode==codes[i]){if(down)keys|=1<<i;else keys&=~(1<<i);}}
+-(void)setKey:(NSEvent*)event down:(BOOL)down{if(mappedInput){if(down)pressedKeys.insert(event.keyCode);else pressedKeys.erase(event.keyCode);return;}const unsigned codes[]={126,125,123,124,7,6,1,0,12,13,36,48};for(unsigned i=0;i<12;i++)if(event.keyCode==codes[i]){if(down)keys|=1<<i;else keys&=~(1<<i);}}
 -(void)keyDown:(NSEvent*)e{[self setKey:e down:YES];}
 -(void)keyUp:(NSEvent*)e{[self setKey:e down:NO];}
 @end
+// Draw only while connecting; normal game rendering and audio are untouched.
+@interface ConnectionAnimationView : NSView
+@end
+@implementation ConnectionAnimationView
+-(void)drawRect:(NSRect)dirty {
+ CGFloat mid=NSMidY(self.bounds),left=55,right=NSWidth(self.bounds)-55;
+ NSColor *purple=[NSColor colorWithRed:0.72 green:0.35 blue:1 alpha:1],*blue=[NSColor colorWithRed:0.15 green:0.8 blue:1 alpha:1];
+ BOOL reduced=NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
+ double phase=reduced?0:CACurrentMediaTime()*0.65;
+ for(int i=0;i<100;i++){
+  CGFloat t=i/100.0,u=(i+1)/100.0;
+  NSBezierPath *path=[NSBezierPath bezierPath];[path moveToPoint:NSMakePoint(left+(right-left)*t,mid+sin(t*M_PI*2)*20)];[path lineToPoint:NSMakePoint(left+(right-left)*u,mid+sin(u*M_PI*2)*20)];
+  [[purple blendedColorWithFraction:t ofColor:blue]setStroke];path.lineWidth=3;[path stroke];
+ }
+ for(int i=0;i<3;i++){
+  double t=fmod(phase+i/3.0,1.0);NSPoint p=NSMakePoint(left+(right-left)*t,mid+sin(t*M_PI*2)*20);
+  NSColor *color=[purple blendedColorWithFraction:t ofColor:blue];
+  [[color colorWithAlphaComponent:0.14]setFill];[[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(p.x-11,p.y-11,22,22)]fill];
+  [color setFill];[[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(p.x-4,p.y-4,8,8)]fill];
+ }
+}
+@end
+
 @interface DisplayDriver : NSObject
 @property(copy) void (^update)(CADisplayLink *);
 @end
@@ -206,9 +244,9 @@ static void presentFrame(const Bytes &pixels,unsigned width,unsigned height,unsi
 @end
 @implementation WindowDelegate
 -(void)windowWillClose:(NSNotification*)n{closing=true;}
--(void)windowDidResignKey:(NSNotification*)n{keys=0;}
+-(void)windowDidResignKey:(NSNotification*)n{keys=0;pressedKeys.clear();}
 @end
-static uint16_t controller(){uint16_t mask=keys;for(GCController *c in GCController.controllers){GCExtendedGamepad *g=c.extendedGamepad;if(!g)continue;GCControllerButtonInput *buttons[]={g.dpad.up,g.dpad.down,g.dpad.left,g.dpad.right,g.buttonA,g.buttonB,g.buttonX,g.buttonY,g.leftShoulder,g.rightShoulder,g.buttonMenu,g.buttonOptions};for(unsigned i=0;i<12;i++)if(buttons[i].pressed)mask|=1<<i;break;}return mask;}
+static uint16_t controller(){if(mappedInput){if(!NSApp.keyWindow)return 0;uint16_t mask=__atomic_load_n(mappedInput,__ATOMIC_ACQUIRE)&0xfff;for(unsigned key:pressedKeys)if(key<128)mask|=__atomic_load_n(mappedInput+1+key,__ATOMIC_ACQUIRE)&0xfff;return mask;}uint16_t mask=keys;for(GCController *c in GCController.controllers){GCExtendedGamepad *g=c.extendedGamepad;if(!g)continue;GCControllerButtonInput *buttons[]={g.dpad.up,g.dpad.down,g.dpad.left,g.dpad.right,g.buttonA,g.buttonB,g.buttonX,g.buttonY,g.leftShoulder,g.rightShoulder,g.buttonMenu,g.buttonOptions};for(unsigned i=0;i<12;i++)if(buttons[i].pressed)mask|=1<<i;break;}return mask;}
 static NSBitmapImageRep *bitmap(const Bytes &pixels,unsigned w,unsigned h){
  NSBitmapImageRep *b=[[NSBitmapImageRep alloc]initWithBitmapDataPlanes:nil pixelsWide:w pixelsHigh:h bitsPerSample:8 samplesPerPixel:3 hasAlpha:NO isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:w*3 bitsPerPixel:24];
  // Cache this once: bitmapData is an AppKit accessor, not a plain field.
@@ -296,7 +334,7 @@ int runSession(){@autoreleasepool{
   reportPath=str(config[@"report"]);bool headless=[config[@"headless"] boolValue];bool serveROM=[config[@"serve_rom"] boolValue];unsigned maxFrames=[config[@"frames"] unsignedIntValue];
   NSURLSessionConfiguration *hc=NSURLSessionConfiguration.ephemeralSessionConfiguration;hc.URLCache=nil;hc.HTTPCookieStorage=nil;hc.URLCredentialStorage=nil;
   http=[NSURLSession sessionWithConfiguration:hc delegate:[NoRedirect new] delegateQueue:nil];
-  NSDictionary *admission=api(@"session",@"GET");std::string role=str(admission[@"room"][@"role"]);host=role=="host";if(serveROM && (!host || !headless))throw std::runtime_error("ROM serving requires a headless host");bool watcher=role=="spectator";playback.setWatcher(watcher);
+  NSDictionary *admission=api(@"session",@"GET");participants(admission[@"room"]);connecting("Verifying game and saved session…");std::string role=str(admission[@"room"][@"role"]);host=role=="host";if(serveROM && (!host || !headless))throw std::runtime_error("ROM serving requires a headless host");bool watcher=role=="spectator";playback.setWatcher(watcher);
   bool useRollback=!config[@"rollback"] || [config[@"rollback"] boolValue];rollbackPlayer=useRollback && !watcher;if(rollbackPlayer)playback.setRollbackPlayer();
   Bytes rom=readFile(str(config[@"rom"]));check(emu_create(EMU_RUNTIME_ABI,rom.data(),uint32_t(rom.size()),&core));uint32_t stateSize;check(emu_state_size(core,&stateSize));Bytes state(stateSize);
   auto stateHash=[&](){check(emu_state_copy(core,state.data(),stateSize));return hash(state);};
@@ -349,6 +387,7 @@ int runSession(){@autoreleasepool{
   // One session poll/second also stays below the lobby request budget.
   api(@"heartbeat",@"POST",@{});
   auto waitStart=Clock::now(),waitHeartbeat=waitStart+std::chrono::seconds(15);NSDictionary *session=nil;
+  connecting("Waiting for the host to start…");
   while(!(session=admission[@"session"]) || session==(id)NSNull.null){
    if(closeRequested())throw std::runtime_error("Game window closed while waiting for host");
    if(Clock::now()-waitStart>std::chrono::minutes(10))throw std::runtime_error("Host has not started this game");
@@ -382,6 +421,7 @@ int runSession(){@autoreleasepool{
    if(preference=="relay")throw std::runtime_error("This room uses LAN transport; relay-only cannot join");
    SteamNetworkingIPAddr address;address.Clear();std::string endpoint=str(session[@"address"])+":"+std::to_string([session[@"port"] unsignedIntValue]);if(!address.ParseString(endpoint.c_str()))throw std::runtime_error("Invalid host address");server=net->ConnectByIPAddress(address,7,opt);if(!server)throw std::runtime_error("Cannot connect to host");peers[server]={};
   }
+  connecting("Establishing player connection…");
   lobbyWorker=std::make_unique<LobbyWorker>(admission);
   if(host)encoder=std::make_unique<VideoEncoder>();
   std::ofstream traceLog;if(!reportPath.empty())traceLog.open(reportPath+".hashes");
@@ -412,7 +452,7 @@ int runSession(){@autoreleasepool{
     // Their destructors join only after the final GNS/ACK drain loop exits.
     if(signalWorker)signalWorker->stop();if(lobbyWorker)lobbyWorker->stop();}
    else{endWait=Clock::time_point{};
-    admission=lobbyWorker->read();
+    admission=lobbyWorker->read();participants(admission[@"room"]);
     if(serveROM && [admission[@"room"][@"rom_request"][@"status"] isEqual:@"received"])break;
     if(serveROM && Clock::now()-preparationStarted>std::chrono::seconds(180))throw std::runtime_error("ROM transfer timed out before import completed");
     if(admission[@"session"]==(id)NSNull.null || ![admission[@"session"][@"id"] isEqual:ns(sessionID)])throw std::runtime_error("Host ended the game");
@@ -449,7 +489,7 @@ int runSession(){@autoreleasepool{
       if(peer.transferringROM)throw std::runtime_error("ROM transfer must finish before gameplay reconnects");
       if(type==1 && host && !peer.authenticated){NSDictionary *h=object(payload);if(![h[@"stream_version"] isEqual:@8] || ![h[@"session"] isEqual:ns(sessionID)] || ![h[@"compatibility"] isEqual:compat])throw std::runtime_error("Incompatible peer");std::string key=str(h[@"key"]),claimed=str(h[@"role"]);if(claimed=="guest" && ![h[@"netcode"] isEqual:useRollback?@"rollback-v3":@"delay-v2"])throw std::runtime_error("Player netcode differs; update both Macs");bool allowed=false;for(NSDictionary *p in admission[@"peers"])if(str(p[@"key"])==key && str(p[@"role"])==claimed)allowed=true;
        if(!allowed || (claimed!="guest" && claimed!="spectator"))throw std::runtime_error("Unadmitted peer");for(auto &[other,p]:peers)if(other!=c && p.authenticated && p.key==key)throw std::runtime_error("Duplicate peer");
-       if(claimed=="guest" && (guest || running))throw std::runtime_error("Player slot occupied");peer.key=key;peer.role=claimed;peer.authenticated=true;if(claimed=="guest")guest=c;
+       if(claimed=="guest" && (guest || running))throw std::runtime_error("Player slot occupied");peer.key=key;peer.role=claimed;peer.authenticated=true;connecting("Player connected — synchronizing game…");if(claimed=="guest")guest=c;
        // GNS defaults to 256 KiB/s; compressed LAN video plus stereo PCM
        // exceeds that. Current PCM plus twelve history blocks uses about 28 KiB/frame.
        // 4 MiB/s permits about 68 KiB/frame at 60 Hz, leaving video/packet headroom.
@@ -458,7 +498,7 @@ int runSession(){@autoreleasepool{
        if(claimed=="spectator"){SteamNetworkingUtils()->SetConnectionConfigValueInt32(c,k_ESteamNetworkingConfig_SendRateMin,4*1024*1024);SteamNetworkingUtils()->SetConnectionConfigValueInt32(c,k_ESteamNetworkingConfig_SendRateMax,4*1024*1024);}
        mustSend(c,2,json(@{@"key":ns(hostKey),@"session":ns(sessionID),@"compatibility":compat,@"stream_version":@8,@"netcode":useRollback?@"rollback-v3":@"delay-v2",@"resume_bytes":@(resumeBytes.size()),@"resume_frames":@(baseFrame),@"resume_sha256":resumeBytes.empty()?@"":ns(saveDigestHex(saveDigest(resumeBytes)))}));continue;
       }
-      if(type==2 && !host && !peer.authenticated){NSDictionary *h=object(payload);if(![h[@"stream_version"] isEqual:@8] || ![h[@"key"] isEqual:ns(hostKey)] || ![h[@"session"] isEqual:ns(sessionID)] || ![h[@"compatibility"] isEqual:compat])throw std::runtime_error("Host verification failed");if(!watcher && ![h[@"netcode"] isEqual:useRollback?@"rollback-v3":@"delay-v2"])throw std::runtime_error("Player netcode differs; update both Macs");peer.authenticated=true;
+      if(type==2 && !host && !peer.authenticated){NSDictionary *h=object(payload);if(![h[@"stream_version"] isEqual:@8] || ![h[@"key"] isEqual:ns(hostKey)] || ![h[@"session"] isEqual:ns(sessionID)] || ![h[@"compatibility"] isEqual:compat])throw std::runtime_error("Host verification failed");if(!watcher && ![h[@"netcode"] isEqual:useRollback?@"rollback-v3":@"delay-v2"])throw std::runtime_error("Player netcode differs; update both Macs");peer.authenticated=true;connecting("Player connected — synchronizing game…");
        if(!watcher){
         if(![h[@"resume_bytes"] isKindOfClass:NSNumber.class] || ![h[@"resume_frames"] isKindOfClass:NSNumber.class] || ![h[@"resume_sha256"] isKindOfClass:NSString.class])throw std::runtime_error("Invalid saved-game offer");
         auto count=[h[@"resume_bytes"] unsignedLongLongValue],frames=[h[@"resume_frames"] unsignedLongLongValue];
@@ -655,9 +695,21 @@ int main(){@autoreleasepool{
   std::string line;std::getline(std::cin,line);if(line.size()>16384)throw std::runtime_error("Invalid launch configuration");config=object(Bytes(line.begin(),line.end()));
   if(config[@"receive_rom"])return receiveROM();
   if([config[@"headless"] boolValue])return runSession();
+  if(NSString *path=config[@"input_state_path"]){
+   int fd=open(path.fileSystemRepresentation,O_RDONLY|O_NOFOLLOW);struct stat st{};
+   if(fd<0 || fstat(fd,&st) || st.st_size!=516 || st.st_uid!=getuid()){if(fd>=0)close(fd);throw std::runtime_error("Cannot open saved controller bindings channel");}
+   void *p=mmap(nullptr,516,PROT_READ,MAP_SHARED,fd,0);close(fd);
+   if(p==MAP_FAILED)throw std::runtime_error("Cannot read saved controller bindings channel");mappedInput=(const uint32_t*)p;
+  }
   [NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];[NSApp finishLaunching];
   NSWindow *window=[[GameWindow alloc]initWithContentRect:NSMakeRect(0,0,768,672) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];window.releasedWhenClosed=NO;window.title=@"Network Play — Connecting";
   GameView *view=[[GameView alloc]initWithFrame:window.contentView.bounds];view.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;window.contentView=view;
+  ConnectionAnimationView *connectionArt=[[ConnectionAnimationView alloc]initWithFrame:NSZeroRect];connectionArt.translatesAutoresizingMaskIntoConstraints=NO;[view addSubview:connectionArt];
+  NSImage *controllerIcon=[NSImage imageWithSystemSymbolName:@"gamecontroller.fill" accessibilityDescription:@"Network player"];
+  for(unsigned i=0;i<2;i++){NSImageView *player=[NSImageView imageViewWithImage:controllerIcon];player.contentTintColor=i?[NSColor colorWithRed:0.15 green:0.8 blue:1 alpha:1]:[NSColor colorWithRed:0.72 green:0.35 blue:1 alpha:1];player.frame=NSMakeRect(i?285:0,25,55,50);[connectionArt addSubview:player];}
+  NSTextField *brand=[NSTextField labelWithString:@"OpenEmu-NX"];brand.textColor=NSColor.whiteColor;brand.font=[NSFont systemFontOfSize:28 weight:NSFontWeightSemibold];brand.translatesAutoresizingMaskIntoConstraints=NO;[view addSubview:brand];
+  NSTextField *connectionLabel=[NSTextField wrappingLabelWithString:@"Connecting to game…"];connectionLabel.alignment=NSTextAlignmentCenter;connectionLabel.textColor=NSColor.secondaryLabelColor;connectionLabel.font=[NSFont systemFontOfSize:16 weight:NSFontWeightMedium];connectionLabel.translatesAutoresizingMaskIntoConstraints=NO;[view addSubview:connectionLabel];
+  [NSLayoutConstraint activateConstraints:@[[connectionArt.widthAnchor constraintEqualToConstant:340],[connectionArt.heightAnchor constraintEqualToConstant:100],[connectionArt.centerXAnchor constraintEqualToAnchor:view.centerXAnchor],[connectionArt.centerYAnchor constraintEqualToAnchor:view.centerYAnchor constant:-12],[brand.centerXAnchor constraintEqualToAnchor:view.centerXAnchor],[brand.bottomAnchor constraintEqualToAnchor:connectionArt.topAnchor constant:-12],[connectionLabel.widthAnchor constraintLessThanOrEqualToAnchor:view.widthAnchor multiplier:0.85],[connectionLabel.centerXAnchor constraintEqualToAnchor:view.centerXAnchor],[connectionLabel.topAnchor constraintEqualToAnchor:connectionArt.bottomAnchor constant:12]]];
   WindowDelegate *wd=[WindowDelegate new];window.delegate=wd;[window center];[window makeKeyAndOrderFront:nil];[window makeFirstResponder:view];[NSApp activateIgnoringOtherApps:YES];
   AVAudioEngine *audio=[AVAudioEngine new];AVAudioFormat *format=[[AVAudioFormat alloc]initStandardFormatWithSampleRate:32040 channels:2];
   mach_timebase_info_data_t timebase;mach_timebase_info(&timebase);double hostSecondsPerTick=double(timebase.numer)/timebase.denom/1e9;
@@ -681,6 +733,10 @@ int main(){@autoreleasepool{
   };
   auto lifecycle=[&](){
    liveInput=controller();
+   BOOL waiting=view.picture==nil;connectionArt.hidden=!waiting;brand.hidden=!waiting;connectionLabel.hidden=!waiting;
+   if(waiting)connectionArt.needsDisplay=YES;
+   if(waiting){std::lock_guard<std::mutex> lock(connectingMutex);NSString *stage=resumeTotal.load()>resumeFrame.load()?[NSString stringWithFormat:@"Restoring multiplayer game… %u / %u frames",resumeFrame.load(),resumeTotal.load()]:ns(connectingStage);connectionLabel.stringValue=[NSString stringWithFormat:@"%@\n\n%@",ns(connectingPlayers),stage];}
+
    if(done || closeRequested()){
     [audio stop];[NSApp stop:nil];
     // stop: takes effect after an event. Wake the outer event loop even when
@@ -701,7 +757,7 @@ int main(){@autoreleasepool{
    if(pixels.empty() && displayedFrames)++repeatedDisplayFrames;
    if(!pixels.empty()){++displayedFrames;lastPicture=Clock::now();if(firstPicture==Clock::time_point{})firstPicture=lastPicture;displayed=frame;auto conversionStart=Clock::now();NSBitmapImageRep *rep=bitmap(pixels,w,h);auto conversionTime=std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now()-conversionStart).count();conversionNS+=conversionTime;maximumConversionNS=std::max(maximumConversionNS,uint64_t(conversionTime));NSImage *image=[[NSImage alloc]initWithSize:NSMakeSize(w,h)];[image addRepresentation:rep];view.picture=image;view.sourceFrame=frame;view.needsDisplay=YES;displayedRole=role;}
    auto uiNow=Clock::now();
-   if(uiNow-titleTime>=std::chrono::seconds(1)){double fps=(view.drawnFrames-titleDraws)/std::chrono::duration<double>(uiNow-titleTime).count();titleTime=uiNow;titleDraws=view.drawnFrames;window.title=[NSString stringWithFormat:@"Network Play — %@ — Frame %u — %.1f draw fps · %@ %@%@",ns(displayedRole),displayed,fps,selectedRoute==2?@"Relay":selectedRoute==1?@"Direct":@"Connecting",networkRTT>=0?[NSString stringWithFormat:@"%d ms",networkRTT.load()]:@"",displayedRole=="spectator"?@" · Read-only":@" · Arrows / Z X A S / Q W / Return / Tab"];}
+   if(uiNow-titleTime>=std::chrono::seconds(1)){double fps=(view.drawnFrames-titleDraws)/std::chrono::duration<double>(uiNow-titleTime).count();titleTime=uiNow;titleDraws=view.drawnFrames;window.title=[NSString stringWithFormat:@"Network Play — %@ — Frame %u — %.1f draw fps · %@ %@%@",ns(displayedRole),displayed,fps,selectedRoute==2?@"Relay":selectedRoute==1?@"Direct":@"Connecting",networkRTT>=0?[NSString stringWithFormat:@"%d ms",networkRTT.load()]:@"",displayedRole=="spectator"?@" · Read-only":(mappedInput?@" · Saved controller settings":@" · Arrows / Z X A S / Q W / Return / Tab")];}
    if(uiNow>=nextReport){diagnostics();nextReport=uiNow+std::chrono::seconds(5);}
 
    // Draw here as well as on AppKit's normal display pass: tracking modes

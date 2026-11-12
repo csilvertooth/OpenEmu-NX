@@ -990,6 +990,12 @@ static CGEventSourceRef _keyboardEventSource;
     return [self type] == OEHIDEventTypeKeyboard && _data.key.keycode == kHIDUsage_KeyboardEscape;
 }
 
+- (NSUInteger)virtualKeyCode
+{
+    NSAssert(self.type == OEHIDEventTypeKeyboard, @"Keyboard event required");
+    return OEHIDUsageToTriplet(_data.key.keycode)->vkCode;
+}
+
 - (NSEvent *)keyboardEvent
 {
     NSAssert1([self type] == OEHIDEventTypeKeyboard, @"Invalid message sent to event \"%@\"", self);

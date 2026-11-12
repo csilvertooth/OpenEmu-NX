@@ -103,6 +103,8 @@ enum {
 
 // Key event
 @property(readonly) NSUInteger              keycode;
+// macOS virtual key code for foreground keyboard delivery.
+@property(readonly) NSUInteger              virtualKeyCode;
 @property(readonly) BOOL                    isEscapeKeyEvent;
 
 // Button or Key event state
