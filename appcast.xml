@@ -7,6 +7,16 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <description>Signed OpenEmu-NX beta releases.</description>
     <language>en</language>
     <item>
+      <title>OpenEmu-NX 0.1.7-beta.4</title>
+      <link>https://github.com/csilvertooth/OpenEmu-NX/releases/tag/v0.1.7-beta.4</link>
+      <sparkle:version>51</sparkle:version>
+      <sparkle:shortVersionString>0.1.7-beta.4</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <pubDate>Thu, 12 Nov 2026 01:14:56 +0000</pubDate>
+      <description>Saved controller and keyboard bindings in network play, plus player names and connection progress.</description>
+      <enclosure url="https://github.com/csilvertooth/OpenEmu-NX/releases/download/v0.1.7-beta.4/OpenEmu-NX-0.1.7-beta.4.dmg" length="53864790" type="application/octet-stream" sparkle:edSignature="z7koUyT6wpWmzC0hGNJhljOqatbehzDGB4uy+nlo2vsZYcX0Mhr7Zsrl18w4N+aI7hzpRoPVQor38qanH6X3AQ=="></enclosure>
+    </item>
+    <item>
       <title>OpenEmu-NX 0.1.7-beta.2</title>
       <link>https://github.com/csilvertooth/OpenEmu-NX/releases/tag/v0.1.7-beta.2</link>
       <sparkle:version>48</sparkle:version>
@@ -58,6 +68,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: U2CtUm/seHMsKn1SyFFwVE5Zub3GD38UMvMIsdggxFx9Oteo2YgDTPTLhteveMOe8rRW1f/xRc8DyMhvjUCLBg==
-length: 4909
+edSignature: RY/RgnQK8cd/kRxEAAHoad511bFFqyuYwIJkOHDQO/tBvR7/Wp7xAndoZ+AZaYis/DIvTPFCWTDKwm6hw2F2DQ==
+length: 5747
 -->
