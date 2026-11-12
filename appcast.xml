@@ -7,6 +7,16 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <description>Signed OpenEmu-NX beta releases.</description>
     <language>en</language>
     <item>
+      <title>OpenEmu-NX 0.1.7-beta.5</title>
+      <link>https://github.com/csilvertooth/OpenEmu-NX/releases/tag/v0.1.7-beta.5</link>
+      <sparkle:version>52</sparkle:version>
+      <sparkle:shortVersionString>0.1.7-beta.5</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <pubDate>Thu, 12 Nov 2026 01:36:36 +0000</pubDate>
+      <description>Corrected app icon variants and a compact About window with the project banner and contributor credits.</description>
+      <enclosure url="https://github.com/csilvertooth/OpenEmu-NX/releases/download/v0.1.7-beta.5/OpenEmu-NX-0.1.7-beta.5.dmg" length="50775182" type="application/octet-stream" sparkle:edSignature="HKxV1jqUJplhb8ONKI7DgPew813zv8aih8bGUemUvpqPl98KvskY6+7nJjml1muJ4XpyKJSgjXpThltC2WiFBQ=="></enclosure>
+    </item>
+    <item>
       <title>OpenEmu-NX 0.1.7-beta.4</title>
       <link>https://github.com/csilvertooth/OpenEmu-NX/releases/tag/v0.1.7-beta.4</link>
       <sparkle:version>51</sparkle:version>
@@ -68,6 +78,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: RY/RgnQK8cd/kRxEAAHoad511bFFqyuYwIJkOHDQO/tBvR7/Wp7xAndoZ+AZaYis/DIvTPFCWTDKwm6hw2F2DQ==
-length: 5747
+edSignature: ljJECfp7NuPzy/LiXLGqskRE0SuzYgJdCTXNJL7airMVIT6JvolGiVLqyk87A0I1YfF5mPwMge8wEq5u6BYSDA==
+length: 6590
 -->
