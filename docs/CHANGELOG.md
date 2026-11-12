@@ -1,3 +1,12 @@
+## 0.1.7-beta.4
+
+- Network play uses each Mac’s own saved controller layout, independently of the other players.
+- Fixed keyboard-only input in the foreground network game window; background keyboard permission is not required.
+- Added a branded connecting animation with player names, room presence, connection stages and saved-game restoration progress.
+- Restored the approved D-pad and two-button icon in the release package and build source.
+
+Validation: build, focused input checks and connecting-screen visual check passed. Two-Mac gameplay was confirmed working by the tester. Signed and notarized release, build 51.
+
 ## 0.1.7-beta.2
 
 - Stable lobby address: https://lobby.azimuthsystems.net.
