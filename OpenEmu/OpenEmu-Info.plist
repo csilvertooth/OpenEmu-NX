@@ -128,7 +128,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.7-beta.4</string>
+	<string>0.1.7-beta.5</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -141,7 +141,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>51</string>
+	<string>52</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
 	<key>LSMinimumSystemVersion</key>

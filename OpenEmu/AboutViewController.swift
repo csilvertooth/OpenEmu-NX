@@ -25,87 +25,77 @@
 import Cocoa
 
 final class AboutViewController: NSViewController {
-    
     @IBOutlet weak var websiteLink: TextButton!
     @IBOutlet weak var gitHubLink: TextButton!
-    
+
+    @objc dynamic var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+    }
+    @objc dynamic var buildVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+    }
+    // Retained for the inherited storyboard binding while its old content is removed.
+    @objc dynamic var specialThanks: NSAttributedString { NSAttributedString(string: "") }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Replace the inherited logo artwork while retaining upstream credits below.
-        view.subviews.compactMap { $0 as? NSImageView }.forEach { $0.isHidden = true }
-        let backdrop = NXAboutBackdrop(frame: view.bounds)
-        backdrop.autoresizingMask = [.width, .height]
-        view.addSubview(backdrop, positioned: .below, relativeTo: nil)
-        websiteLink.title = "Project on GitHub"
-        gitHubLink.title = "Releases and Updates"
-        
-        let color = NSColor(from: "#526ba0")
-        let hoverColor = NSColor(from: "#9c2a32")
-        
-        let shadow = NSShadow()
-        shadow.shadowColor = .black
-        shadow.shadowOffset = NSMakeSize(0, -1)
-        
-        websiteLink.font = .boldSystemFont(ofSize: 12)
-        websiteLink.textShadow = shadow
-        websiteLink.textColor = color
-        websiteLink.textColorHover = hoverColor
-        
-        shadow.shadowColor = .black.withAlphaComponent(0.4)
-        
-        gitHubLink.font = .boldSystemFont(ofSize: 11)
-        gitHubLink.textShadow = shadow
-        gitHubLink.textColor = color
-        gitHubLink.textColorHover = hoverColor
-    }
-    
-    @objc dynamic var appVersion: String {
-        return Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
-    }
-    
-    @objc dynamic var buildVersion: String {
-        return Bundle.main.infoDictionary!["OEBuildVersion"] as? String ?? ""
-    }
-    
-    @objc dynamic lazy var specialThanks: NSAttributedString = {
-        let msg = NSLocalizedString("Built on OpenEmu and OpenEmu-Silicon.\nThank you to their contributors and\nthe emulator core teams. Original\ncredits and licenses are preserved\nin our project repository.", comment: "Special thanks message (about window).")
-        let paragraphStyle = NSParagraphStyle.default.mutableCopy() as! NSMutableParagraphStyle
-        paragraphStyle.alignment = .center
-        paragraphStyle.lineHeightMultiple = 1.225
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
-            .paragraphStyle: paragraphStyle,
-            .foregroundColor: NSColor.white
-        ]
-        return NSAttributedString(string: msg, attributes: attributes)
-    }()
-    
-    @IBAction func openWeblink(_ sender: AnyObject?) {
-        if let button = sender as? NSButton {
-            let address = button === gitHubLink ? AppDelegate.releaseNotesAddress : AppDelegate.websiteAddress
-            if let url = URL(string: address) { NSWorkspace.shared.open(url) }
+        view.subviews.forEach { $0.removeFromSuperview() }
+        view.setFrameSize(NSSize(width: 680, height: 440))
+        let banner = NSImageView(image: NSImage(named: "NXAboutBanner") ?? NSImage())
+        banner.imageScaling = .scaleProportionallyUpOrDown
+        banner.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        banner.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        banner.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        banner.setContentHuggingPriority(.defaultLow, for: .vertical)
+        banner.setAccessibilityLabel("OpenEmu-NX. Classic games. Together.")
+        banner.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(banner)
+
+        func label(_ text: String, size: CGFloat, weight: NSFont.Weight = .regular) -> NSTextField {
+            let field = NSTextField(wrappingLabelWithString: text)
+            field.font = .systemFont(ofSize: size, weight: weight)
+            field.alignment = .center
+            return field
         }
-    }
-}
-
-
-private final class NXAboutBackdrop: NSView {
-    override func draw(_ dirtyRect: NSRect) {
-        NSGradient(starting: NSColor(calibratedRed: 0.06, green: 0.08, blue: 0.16, alpha: 1),
-                   ending: NSColor(calibratedRed: 0.17, green: 0.10, blue: 0.28, alpha: 1))?
-            .draw(in: bounds, angle: 90)
-        let style = NSMutableParagraphStyle()
-        style.alignment = .center
-        let title = NSAttributedString(string: "OpenEmu-NX", attributes: [
-            .font: NSFont.systemFont(ofSize: 43, weight: .bold),
-            .foregroundColor: NSColor.white, .paragraphStyle: style
+        let version = label("OpenEmu-NX \(appVersion)", size: 19, weight: .semibold)
+        let build = label("Build \(buildVersion)", size: 12)
+        build.textColor = .secondaryLabelColor
+        let credits = label("OpenEmu-NX by Chris Silvertooth\nBuilt on OpenEmu and OpenEmu-Silicon.\nWith thanks to their contributors and the emulator core teams.", size: 13)
+        let licenses = label("Original credits and licenses are preserved in the project repository.", size: 11)
+        licenses.textColor = .secondaryLabelColor
+        let project = NSButton(title: "Project on GitHub", target: self, action: #selector(openProject))
+        let releases = NSButton(title: "Releases and Updates", target: self, action: #selector(openReleases))
+        let links = NSStackView(views: [project, releases])
+        links.orientation = .horizontal
+        links.spacing = 12
+        let content = NSStackView(views: [version, build, credits, licenses, links])
+        content.orientation = .vertical
+        content.alignment = .centerX
+        content.spacing = 12
+        content.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(content)
+        NSLayoutConstraint.activate([
+            banner.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            banner.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            banner.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
+            banner.heightAnchor.constraint(equalTo: banner.widthAnchor, multiplier: 400.0 / 1280.0),
+            content.topAnchor.constraint(equalTo: banner.bottomAnchor, constant: 20),
+            content.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            content.widthAnchor.constraint(equalTo: view.widthAnchor, constant: -48),
+            content.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -20),
+            credits.widthAnchor.constraint(equalTo: content.widthAnchor),
+            licenses.widthAnchor.constraint(equalTo: content.widthAnchor)
         ])
-        title.draw(in: NSRect(x: 12, y: 300, width: bounds.width - 24, height: 58))
-        let subtitle = NSAttributedString(string: "Classic games. Together.", attributes: [
-            .font: NSFont.systemFont(ofSize: 15, weight: .medium),
-            .foregroundColor: NSColor(calibratedRed: 0.64, green: 0.74, blue: 1, alpha: 1),
-            .paragraphStyle: style
-        ])
-        subtitle.draw(in: NSRect(x: 12, y: 273, width: bounds.width - 24, height: 24))
     }
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        view.window?.setContentSize(NSSize(width: 680, height: 440))
+        view.window?.title = "About OpenEmu-NX"
+    }
+    @objc private func openProject() { open(AppDelegate.websiteAddress) }
+    @objc private func openReleases() { open(AppDelegate.releaseNotesAddress) }
+    private func open(_ address: String) {
+        if let url = URL(string: address) { NSWorkspace.shared.open(url) }
+    }
+    @IBAction func openWeblink(_ sender: AnyObject?) { openProject() }
 }

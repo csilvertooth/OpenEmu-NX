@@ -1,3 +1,11 @@
+## 0.1.7-beta.5
+
+- Corrected all app icon asset variants, including dark appearance, to use the approved D-pad and two-button artwork.
+- Added the project banner to a compact About window without stretching or cropping.
+- Credits now name Chris Silvertooth alongside OpenEmu, OpenEmu-Silicon and emulator core contributors.
+
+Validation: successful build, icon variant checks and user-approved visual inspection. Gameplay code is unchanged from Beta 4. Build 52.
+
 ## 0.1.7-beta.4
 
 - Network play uses each Mac’s own saved controller layout, independently of the other players.
