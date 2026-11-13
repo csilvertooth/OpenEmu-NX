@@ -141,3 +141,72 @@ enum ArchiveHelper {
         return fileName
     }
 }
+
+
+/// Serial preparation keeps extraction off the UI thread and prevents duplicate writes.
+/// Archive paths are never used as destination paths. Only the library's selected entry is read.
+actor NetworkROMPreparation {
+    static let shared = NetworkROMPreparation()
+    private let temporaryRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("NX-Netplay-ROMs-" + UUID().uuidString, isDirectory: true)
+
+    struct Prepared: Sendable {
+        let url: URL
+        let sha256: String
+    }
+
+    func prepare(source: URL, index: Int?, retainedRoot: URL?) throws -> Prepared {
+        let fm = FileManager.default
+        func error(_ message: String) -> NSError {
+            NSError(domain: "NetworkROMPreparation", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+        }
+        func hash(_ url: URL) throws -> String { try fm.hashFile(at: url, hashFunction: .sha256) }
+        try Task.checkCancellation()
+        guard let index else {
+            guard !["zip", "7z", "rar", "gz"].contains(source.pathExtension.lowercased()) else {
+                throw error("The archive has no selected library ROM. Import it into your library again before using netplay.")
+            }
+            return Prepared(url: source, sha256: try hash(source))
+        }
+        guard index >= 0, index <= Int(Int32.max),
+              let archive = XADArchive.oe_archiveForFile(at: source),
+              index < Int(archive.numberOfEntries()) else {
+            throw error("The selected ROM could not be found in its archive. Import the archive again.")
+        }
+        let entry = Int32(index)
+        // Current network runtime is SNES. Bound extraction before allocating disk space.
+        let maximumSize: Int64 = 64 * 1024 * 1024
+        guard archive.entryHasSize(entry), archive.uncompressedSize(ofEntry: entry) > 0,
+              archive.uncompressedSize(ofEntry: entry) <= maximumSize,
+              !archive.entryIsEncrypted(entry), !archive.entryIsDirectory(entry),
+              !archive.entryIsLink(entry), !archive.entryIsArchive(entry) else {
+            throw error("Netplay needs an unencrypted ROM entry no larger than 64 MB; folders, links and nested archives are not supported.")
+        }
+        // Content addressing invalidates the cache even if an archive changes without changing its date.
+        let archiveHash = try hash(source)
+        let folder = (retainedRoot ?? temporaryRoot).appendingPathComponent(archiveHash + "-" + String(index), isDirectory: true)
+        let suffix = URL(fileURLWithPath: archive.name(ofEntry: entry)).pathExtension.lowercased()
+        let safeSuffix = suffix.isEmpty || suffix.count > 8 || !suffix.allSatisfy({ $0.isLetter || $0.isNumber }) ? "rom" : suffix
+        let output = folder.appendingPathComponent("game." + safeSuffix)
+        let checksum = folder.appendingPathComponent("sha256.txt")
+        if let expected = try? String(contentsOf: checksum, encoding: .utf8),
+           let actual = try? hash(output), actual == expected {
+            return Prepared(url: output, sha256: actual)
+        }
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let partial = folder.appendingPathComponent(UUID().uuidString + ".partial")
+        defer { try? fm.removeItem(at: partial) }
+        guard archive.oe_extractEntry(entry, as: partial.path, deferDirectories: false, dataFork: true, resourceFork: false),
+              let size = (try? fm.attributesOfItem(atPath: partial.path)[.size]) as? NSNumber,
+              size.int64Value == archive.uncompressedSize(ofEntry: entry), size.int64Value <= maximumSize else {
+            throw error("Could not decompress this ROM. The archive may be damaged or incomplete.")
+        }
+        try Task.checkCancellation()
+        guard try hash(source) == archiveHash else { throw error("The archive changed during extraction. Try again.") }
+        let sha = try hash(partial)
+        if fm.fileExists(atPath: output.path) { try fm.removeItem(at: output) }
+        try fm.moveItem(at: partial, to: output)
+        try sha.write(to: checksum, atomically: true, encoding: .utf8)
+        return Prepared(url: output, sha256: sha)
+    }
+}

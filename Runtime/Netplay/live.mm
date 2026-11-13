@@ -44,6 +44,7 @@ using namespace emu;
 using Clock=std::chrono::steady_clock;
 static std::string str(NSString *s){return s ? s.UTF8String : "";}
 static NSString *ns(const std::string &s){return [NSString stringWithUTF8String:s.c_str()];}
+#include "runtime_loader.h"
 static Bytes readFile(const std::string &p){std::ifstream f(p,std::ios::binary|std::ios::ate);if(!f || f.tellg()<0 || f.tellg()>32*1024*1024)throw std::runtime_error("Cannot read game/runtime");Bytes b((size_t)f.tellg());f.seekg(0);f.read((char*)b.data(),b.size());if(!f)throw std::runtime_error("Read failed");return b;}
 static std::string hash(const Bytes &b){unsigned char h[32];SHA256(b.data(),b.size(),h);std::ostringstream o;for(auto c:h)o<<std::hex<<std::setw(2)<<std::setfill('0')<<unsigned(c);return o.str();}
 static void check(int r){if(r)throw std::runtime_error("Emulation runtime failed");}
@@ -149,7 +150,8 @@ static std::string connectingStage="Contacting lobby…", connectingPlayers;
 static void connecting(const char *stage){std::lock_guard<std::mutex> lock(connectingMutex);connectingStage=stage;}
 static void participants(NSDictionary *room){
  NSMutableArray *lines=[NSMutableArray array];
- for(NSString *key in @[@"host_name",@"guest_name"]){id name=room[key];if([name isKindOfClass:NSString.class] && [name length])[lines addObject:[NSString stringWithFormat:@"%@ — in room",name]];}
+ if([room[@"player_names"] isKindOfClass:NSArray.class]){for(NSDictionary *p in room[@"player_names"]){if([p[@"name"] isKindOfClass:NSString.class])[lines addObject:[NSString stringWithFormat:@"Player %u: %@ — in room",[p[@"slot"] unsignedIntValue]+1,p[@"name"]]];}}
+ else for(NSString *key in @[@"host_name",@"guest_name"]){id name=room[key];if([name isKindOfClass:NSString.class] && [name length])[lines addObject:[NSString stringWithFormat:@"%@ — in room",name]];}
  if([room[@"watcher_names"] isKindOfClass:NSArray.class] && [room[@"watcher_names"] count])[lines addObject:[NSString stringWithFormat:@"Spectators: %@",[room[@"watcher_names"] componentsJoinedByString:@", "]]];
  std::lock_guard<std::mutex> lock(connectingMutex);connectingPlayers=str([lines componentsJoinedByString:@"\n"]);
 }
@@ -244,9 +246,23 @@ static void presentFrame(const Bytes &pixels,unsigned width,unsigned height,unsi
 @end
 @implementation WindowDelegate
 -(void)windowWillClose:(NSNotification*)n{closing=true;}
--(void)windowDidResignKey:(NSNotification*)n{keys=0;pressedKeys.clear();}
+-(void)windowDidResignKey:(NSNotification*)n{
+ keys=0;pressedKeys.clear();
+ // Record focus changes for diagnosing unexpected backgrounding; never force
+ // activation while the user is interacting with another application.
+ NSString *report=config[@"audio_report"];
+ if(![report isKindOfClass:NSString.class] || !report.length)return;
+ dispatch_after(dispatch_time(DISPATCH_TIME_NOW,100*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
+  NSRunningApplication *front=NSWorkspace.sharedWorkspace.frontmostApplication;
+  NSDictionary *event=@{@"time":@([NSDate date].timeIntervalSince1970),@"front_app":front.bundleIdentifier ?: @"unknown",@"front_pid":@(front.processIdentifier)};
+  NSData *data=[NSJSONSerialization dataWithJSONObject:event options:0 error:nil];
+  NSString *path=[report stringByAppendingString:@".focus.jsonl"];
+  int fd=open(path.fileSystemRepresentation,O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW,0600);
+  if(fd>=0){write(fd,data.bytes,data.length);write(fd,"\n",1);close(fd);}
+ });
+}
 @end
-static uint16_t controller(){if(mappedInput){if(!NSApp.keyWindow)return 0;uint16_t mask=__atomic_load_n(mappedInput,__ATOMIC_ACQUIRE)&0xfff;for(unsigned key:pressedKeys)if(key<128)mask|=__atomic_load_n(mappedInput+1+key,__ATOMIC_ACQUIRE)&0xfff;return mask;}uint16_t mask=keys;for(GCController *c in GCController.controllers){GCExtendedGamepad *g=c.extendedGamepad;if(!g)continue;GCControllerButtonInput *buttons[]={g.dpad.up,g.dpad.down,g.dpad.left,g.dpad.right,g.buttonA,g.buttonB,g.buttonX,g.buttonY,g.leftShoulder,g.rightShoulder,g.buttonMenu,g.buttonOptions};for(unsigned i=0;i<12;i++)if(buttons[i].pressed)mask|=1<<i;break;}return mask;}
+static uint16_t controller(){if(mappedInput){if(!NSApp.keyWindow)return 0;uint16_t mask=__atomic_load_n(mappedInput,__ATOMIC_ACQUIRE)&0xfff;for(unsigned key:pressedKeys)if(key<128)mask|=__atomic_load_n(mappedInput+1+key,__ATOMIC_ACQUIRE)&0xfff;return mask;}uint16_t mask=keys;for(GCController *c in GCController.controllers){GCExtendedGamepad *g=c.extendedGamepad;if(!g)continue;GCControllerButtonInput *buttons[]={g.dpad.up,g.dpad.down,g.dpad.left,g.dpad.right,g.buttonA,g.buttonB,g.buttonX,g.buttonY,g.leftShoulder,g.rightShoulder,g.buttonMenu,g.buttonOptions};for(unsigned i=0;i<12;i++)if(buttons[i].pressed)mask|=1<<i;break;}if(const char *system=getenv("NX_NETPLAY_SYSTEM");system){if(std::string(system)=="openemu.system.nes")mask=(mask&0x3f)|((mask&(1<<10))>>4)|((mask&(1<<11))>>4);else if(std::string(system)=="openemu.system.gba")mask=(mask&0x3f)|((mask&(3<<8))>>2)|((mask&(3<<10))>>2);}return mask;}
 static NSBitmapImageRep *bitmap(const Bytes &pixels,unsigned w,unsigned h){
  NSBitmapImageRep *b=[[NSBitmapImageRep alloc]initWithBitmapDataPlanes:nil pixelsWide:w pixelsHigh:h bitsPerSample:8 samplesPerPixel:3 hasAlpha:NO isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:w*3 bitsPerPixel:24];
  // Cache this once: bitmapData is an AppKit accessor, not a plain field.
@@ -254,12 +270,12 @@ static NSBitmapImageRep *bitmap(const Bytes &pixels,unsigned w,unsigned h){
  auto *destination=b.bitmapData;
  for(unsigned i=0;i<w*h;i++){uint16_t v=pixels[i*2]|(pixels[i*2+1]<<8);destination[i*3]=((v>>11)&31)*255/31;destination[i*3+1]=((v>>5)&63)*255/63;destination[i*3+2]=(v&31)*255/31;}return b;
 }
-struct Peer{bool connected=false,authenticated=false,transferringROM=false;size_t romOffset=0;std::string role,key;Clock::time_point born=Clock::now();};
+struct Peer{unsigned slot=0;bool ready=false,connected=false,authenticated=false,transferringROM=false;size_t romOffset=0;std::string role,key;Clock::time_point born=Clock::now();};
 static ISteamNetworkingSockets *net=nullptr;static HSteamListenSocket listener=0;static HSteamNetConnection server=0,guest=0;static bool host=false,running=false,failed=false;static std::map<HSteamNetConnection,Peer> peers;
 static void connection(SteamNetConnectionStatusChangedCallback_t *e){
  if(e->m_info.m_eState==k_ESteamNetworkingConnectionState_Connecting && host){if(peers.size()>=20){net->CloseConnection(e->m_hConn,0,"capacity",false);return;}peers[e->m_hConn]={};net->AcceptConnection(e->m_hConn);}
  if(e->m_info.m_eState==k_ESteamNetworkingConnectionState_Connected)peers[e->m_hConn].connected=true;
- if(e->m_info.m_eState==k_ESteamNetworkingConnectionState_ClosedByPeer || e->m_info.m_eState==k_ESteamNetworkingConnectionState_ProblemDetectedLocally){if(e->m_hConn==guest || (!host && e->m_hConn==server))failed=true;connectionFailure=e->m_info.m_eEndReason==k_ESteamNetConnectionEnd_Misc_P2P_Rendezvous?"Could not establish a connection. Check the lobby and direct/relay service, then try again.":"The other player disconnected or the network connection was lost.";net->CloseConnection(e->m_hConn,0,"closed",false);peers.erase(e->m_hConn);}
+ if(e->m_info.m_eState==k_ESteamNetworkingConnectionState_ClosedByPeer || e->m_info.m_eState==k_ESteamNetworkingConnectionState_ProblemDetectedLocally){fprintf(stderr,"Network connection ended (%d): %s\n",e->m_info.m_eEndReason,e->m_info.m_szEndDebug);if((peers.count(e->m_hConn) && peers.at(e->m_hConn).authenticated && peers.at(e->m_hConn).role=="guest") || (!host && e->m_hConn==server))failed=true;connectionFailure=e->m_info.m_eEndReason==k_ESteamNetConnectionEnd_Misc_P2P_Rendezvous?"Could not establish a connection. Check the lobby and direct/relay service, then try again.":"The other player disconnected or the network connection was lost.";net->CloseConnection(e->m_hConn,0,"closed",false);peers.erase(e->m_hConn);}
 }
 static bool send(HSteamNetConnection c,uint8_t type,const Bytes &payload={},bool reliable=true){Bytes b{type};b.insert(b.end(),payload.begin(),payload.end());return net->SendMessageToConnection(c,b.data(),uint32_t(b.size()),reliable?k_nSteamNetworkingSend_ReliableNoNagle:k_nSteamNetworkingSend_UnreliableNoDelay,nullptr)==k_EResultOK;}
 static void mustSend(HSteamNetConnection c,uint8_t t,const Bytes &b={}){if(!send(c,t,b))throw std::runtime_error("Player transport queue full");}
@@ -336,18 +352,26 @@ int runSession(){@autoreleasepool{
   http=[NSURLSession sessionWithConfiguration:hc delegate:[NoRedirect new] delegateQueue:nil];
   NSDictionary *admission=api(@"session",@"GET");participants(admission[@"room"]);connecting("Verifying game and saved session…");std::string role=str(admission[@"room"][@"role"]);host=role=="host";if(serveROM && (!host || !headless))throw std::runtime_error("ROM serving requires a headless host");bool watcher=role=="spectator";playback.setWatcher(watcher);
   bool useRollback=!config[@"rollback"] || [config[@"rollback"] boolValue];rollbackPlayer=useRollback && !watcher;if(rollbackPlayer)playback.setRollbackPlayer();
+  unsigned playerCount=[admission[@"room"][@"capacity"] unsignedIntValue];if(!playerCount)playerCount=2;
+  unsigned localPlayer=host?0:watcher?0:admission[@"room"][@"player_slot"]?[admission[@"room"][@"player_slot"] unsignedIntValue]:1;
+  bool multitap=playerCount>2;
+  if(playerCount<2 || playerCount>5 || localPlayer>=playerCount || (multitap && (!useRollback || !nxRuntime.stepPlayers)))throw std::runtime_error("Unsupported player topology");
+  setenv("NX_NETPLAY_PLAYERS",std::to_string(playerCount).c_str(),1);
+  auto stepPlayers=[&](const SaveInputs &pads,emu_frame *out){return multitap?emu_step_players(core,pads.data(),playerCount,out):emu_step(core,pads[0],pads[1],out);};
+  auto sendPlayers=[&](uint8_t type,const Bytes &b,HSteamNetConnection except=0){if(host){for(auto &[c,p]:peers)if(c!=except && p.authenticated && p.role=="guest")mustSend(c,type,b);}else mustSend(server,type,b);};
+  setenv("NX_NETPLAY_VIEW",host?"0":"1",1);
   Bytes rom=readFile(str(config[@"rom"]));check(emu_create(EMU_RUNTIME_ABI,rom.data(),uint32_t(rom.size()),&core));uint32_t stateSize;check(emu_state_size(core,&stateSize));Bytes state(stateSize);
   auto stateHash=[&](){check(emu_state_copy(core,state.data(),stateSize));return hash(state);};
-  Dl_info loaded{};if(!dladdr((void*)&emu_create,&loaded))throw std::runtime_error("Runtime not loaded");
+  Dl_info loaded{};if(!dladdr((void*)emu_create,&loaded))throw std::runtime_error("Runtime not loaded");
   NSDictionary *compat=@{@"protocol":@1,@"profile":ns(emu_runtime_profile()),@"rom_sha256":ns(hash(rom)),@"runtime_sha256":ns(hash(readFile(loaded.dli_fname))),@"initial_state_sha256":ns(stateHash())};
   if(![compat isEqual:admission[@"room"][@"compatibility"]])throw std::runtime_error("Game or runtime changed since joining the lobby");
   SaveIdentity saveIdentity{str(compat[@"profile"]),saveDigestFromHex(str(compat[@"rom_sha256"])),saveDigestFromHex(str(compat[@"runtime_sha256"])),saveDigestFromHex(str(compat[@"initial_state_sha256"]))};
-  SaveJournal journal;journal.identity=saveIdentity;Bytes resumeBytes;SaveTransfer resumeTransfer;
+  SaveJournal journal;journal.players=playerCount;journal.identity=saveIdentity;Bytes resumeBytes;SaveTransfer resumeTransfer;
   bool replayActive=false,replayDone=true,readySent=false,guestReady=false,saveRecording=true;
   unsigned baseFrame=0,replayed=0,runIndex=0,runOffset=0;std::string resumeHash=str(compat[@"initial_state_sha256"]);
   auto preparationStarted=Clock::now();
   if(config[@"resume_path"]){if(!host || !useRollback || ![config[@"resume_path"] isKindOfClass:NSString.class])throw std::runtime_error("Only a rollback host can load a saved game");
-   resumeBytes=readMultiplayerSave(str(config[@"resume_path"]));journal=SaveJournal::decode(resumeBytes,saveIdentity);baseFrame=journal.frames();resumeTotal=baseFrame;replayActive=true;replayDone=false;
+   resumeBytes=readMultiplayerSave(str(config[@"resume_path"]));journal=SaveJournal::decode(resumeBytes,saveIdentity);if(journal.players!=playerCount)throw std::runtime_error("Saved player count differs");baseFrame=journal.frames();resumeTotal=baseFrame;replayActive=true;replayDone=false;
   }
   if(host && config[@"autosave_path"]){if(!useRollback || ![config[@"autosave_path"] isKindOfClass:NSString.class])throw std::runtime_error("Invalid multiplayer save destination");saveWriter=std::make_unique<SaveWriter>(str(config[@"autosave_path"]));}
   Bytes saveCheckpoint=state;unsigned saveCheckpointFrame=0;
@@ -359,7 +383,7 @@ int runSession(){@autoreleasepool{
    try{
     if(saveRecording && replayDone && journal.frames()){
      check(emu_state_restore(core,saveCheckpoint.data(),uint32_t(saveCheckpoint.size())));
-     journal.replayConfirmedTail(saveCheckpointFrame,[&](unsigned,uint16_t p1,uint16_t p2){emu_frame ignored{};check(emu_step(core,p1,p2,&ignored));});
+     journal.replayPlayersTail(saveCheckpointFrame,[&](unsigned,const SaveInputs &pads){emu_frame ignored{};check(stepPlayers(pads,&ignored));});
      check(emu_state_copy(core,state.data(),stateSize));journal.finalState=saveDigest(state);saveWriter->submit(journal);
     }
    }catch(const std::exception &e){std::lock_guard<std::mutex> lock(saveStatusMutex);saveError=e.what();}
@@ -370,7 +394,11 @@ int runSession(){@autoreleasepool{
   SteamNetworkingIdentity localIdentity;localIdentity.Clear();
   if(admission[@"identity"] && !localIdentity.ParseString([admission[@"identity"] UTF8String]))throw std::runtime_error("Invalid lobby identity");
   SteamDatagramErrMsg err;if(!GameNetworkingSockets_Init(localIdentity.IsInvalid()?nullptr:&localIdentity,err))throw std::runtime_error(err);net=SteamNetworkingSockets();
-  SteamNetworkingConfigValue_t opt[7];opt[0].SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,(void*)&connection);opt[1].SetInt32(k_ESteamNetworkingConfig_IP_AllowWithoutAuth,2);opt[2].SetInt32(k_ESteamNetworkingConfig_SendBufferSize,1024*1024);opt[3].SetInt32(k_ESteamNetworkingConfig_RecvBufferSize,2*1024*1024);opt[4].SetInt32(k_ESteamNetworkingConfig_RecvBufferMessages,256);opt[5].SetInt32(k_ESteamNetworkingConfig_RecvMaxMessageSize,300000);opt[6].SetInt32(k_ESteamNetworkingConfig_TimeoutConnected,5000);
+  if(headless && [config[@"local_test_mode"] boolValue] && [config[@"network_debug"] boolValue]) SteamNetworkingUtils()->SetDebugOutputFunction(k_ESteamNetworkingSocketsDebugOutputType_Verbose, [](ESteamNetworkingSocketsDebugOutputType, const char *message){ fprintf(stderr,"GNS: %s\n",message); });
+  SteamNetworkingConfigValue_t opt[8];opt[0].SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,(void*)&connection);opt[1].SetInt32(k_ESteamNetworkingConfig_IP_AllowWithoutAuth,2);opt[2].SetInt32(k_ESteamNetworkingConfig_SendBufferSize,1024*1024);opt[3].SetInt32(k_ESteamNetworkingConfig_RecvBufferSize,2*1024*1024);opt[4].SetInt32(k_ESteamNetworkingConfig_RecvBufferMessages,256);opt[5].SetInt32(k_ESteamNetworkingConfig_RecvMaxMessageSize,300000);opt[6].SetInt32(k_ESteamNetworkingConfig_TimeoutConnected,5000);
+  // Multiple ICE handshakes share the room signaling channel. Give setup
+  // enough time without extending the gameplay disconnect deadline.
+  opt[7].SetInt32(k_ESteamNetworkingConfig_TimeoutInitial,multitap?45000:10000);
   bool requestICE=config[@"connection"]!=nil;
   std::string preference=config[@"connection"]?str(config[@"connection"]):"automatic";
   if(preference!="automatic" && preference!="direct" && preference!="relay")throw std::runtime_error("Invalid connection preference");
@@ -381,7 +409,11 @@ int runSession(){@autoreleasepool{
    SteamNetworkingUtils()->SetGlobalConfigValueFloat(k_ESteamNetworkingConfig_FakePacketLoss_Send,float(loss));
   }
   if(host && requestICE){api(@"launch",@"POST",@{@"transport":@"ice",@"route":ns(preference),@"delay":config[@"delay"]?:@3,@"purpose":serveROM?@"rom-transfer":@"game"});launched=true;}
-  if(host && !requestICE){SteamNetworkingIPAddr address;address.Clear();for(int attempt=0;attempt<8 && !listener;attempt++){address.m_port=49152+arc4random_uniform(16384);listener=net->CreateListenSocketIP(address,7,opt);}if(!listener || !net->GetListenSocketAddress(listener,&address))throw std::runtime_error("Cannot listen for players");api(@"launch",@"POST",@{@"address":ns(localAddress()),@"port":@(address.m_port),@"delay":config[@"delay"]?:@3});launched=true;}
+  if(host && !requestICE){SteamNetworkingIPAddr address;address.Clear();
+   // Bind the advertised interface: wildcard replies can use a different LAN
+   // address on a multi-homed Mac and are then rejected by the remote peer.
+   std::string advertised=localAddress();if(!address.ParseString(advertised.c_str()))throw std::runtime_error("Invalid local game address");
+   for(int attempt=0;attempt<8 && !listener;attempt++){address.m_port=49152+arc4random_uniform(16384);listener=net->CreateListenSocketIP(address,8,opt);}if(!listener || !net->GetListenSocketAddress(listener,&address))throw std::runtime_error("Cannot listen for players");api(@"launch",@"POST",@{@"address":ns(advertised),@"port":@(address.m_port),@"delay":config[@"delay"]?:@3});launched=true;}
   // Waiting for the host is still an active membership. Renew before waiting
   // and every 15 seconds; otherwise a late start races the 60-second lease.
   // One session poll/second also stays below the lobby request budget.
@@ -415,29 +447,36 @@ int runSession(){@autoreleasepool{
     utils->SetGlobalConfigValueString(k_ESteamNetworkingConfig_P2P_TURN_PassList,[[passwords componentsJoinedByString:@","] UTF8String]);
    }
    signals=std::make_shared<SignalMailbox>();signalWorker=std::make_unique<SignalWorker>(signals,sessionID,[admission[@"signaling_request_ids"] isEqual:@YES]);
-   if(host){listener=net->CreateListenSocketP2P(0,7,opt);if(!listener)throw std::runtime_error("Cannot create P2P listener");}
-   else{SteamNetworkingIdentity remote;remote.Clear();if(!remote.ParseString([admission[@"host_identity"] UTF8String]))throw std::runtime_error("Invalid host identity");server=net->ConnectP2PCustomSignaling(new LobbySignaler(signals,str(admission[@"host_identity"])),&remote,0,7,opt);if(!server)throw std::runtime_error("Cannot start ICE connection");peers[server]={};}
+   if(host){listener=net->CreateListenSocketP2P(0,8,opt);if(!listener)throw std::runtime_error("Cannot create P2P listener");}
+   else{SteamNetworkingIdentity remote;remote.Clear();if(!remote.ParseString([admission[@"host_identity"] UTF8String]))throw std::runtime_error("Invalid host identity");server=net->ConnectP2PCustomSignaling(new LobbySignaler(signals,str(admission[@"host_identity"])),&remote,0,8,opt);if(!server)throw std::runtime_error("Cannot start ICE connection");peers[server]={};}
   }else if(!host){
    if(preference=="relay")throw std::runtime_error("This room uses LAN transport; relay-only cannot join");
-   SteamNetworkingIPAddr address;address.Clear();std::string endpoint=str(session[@"address"])+":"+std::to_string([session[@"port"] unsignedIntValue]);if(!address.ParseString(endpoint.c_str()))throw std::runtime_error("Invalid host address");server=net->ConnectByIPAddress(address,7,opt);if(!server)throw std::runtime_error("Cannot connect to host");peers[server]={};
+   SteamNetworkingIPAddr address;address.Clear();std::string endpoint=str(session[@"address"])+":"+std::to_string([session[@"port"] unsignedIntValue]);if(!address.ParseString(endpoint.c_str()))throw std::runtime_error("Invalid host address");server=net->ConnectByIPAddress(address,8,opt);if(!server)throw std::runtime_error("Cannot connect to host");peers[server]={};
   }
   connecting("Establishing player connection…");
   lobbyWorker=std::make_unique<LobbyWorker>(admission);
   if(host)encoder=std::make_unique<VideoEncoder>();
   std::ofstream traceLog;if(!reportPath.empty())traceLog.open(reportPath+".hashes");
-  std::vector<std::array<uint16_t,2>> trace;if(config[@"trace"]){std::ifstream f(str(config[@"trace"]));unsigned n,a,b;while(f>>n>>a>>b){if(n!=trace.size()+1 || a>4095 || b>4095)throw std::runtime_error("Invalid test trace");trace.push_back({uint16_t(a),uint16_t(b)});}}
-  std::map<unsigned,std::string> localHashes,remoteHashes;auto compare=[&](){for(auto it=remoteHashes.begin();it!=remoteHashes.end();){auto own=localHashes.find(it->first);if(own==localHashes.end()){++it;continue;}if(own->second!=it->second)throw std::runtime_error("State mismatch at frame "+std::to_string(it->first));localHashes.erase(own);it=remoteHashes.erase(it);}if(localHashes.size()>10 || remoteHashes.size()>10)throw std::runtime_error("State verification timed out");};
+  std::vector<SaveInputs> trace;if(config[@"trace"]){std::ifstream f(str(config[@"trace"]));unsigned n,a;while(f>>n){SaveInputs pads{};if(n!=trace.size()+1)throw std::runtime_error("Invalid test frame");for(unsigned p=0;p<playerCount;++p){if(!(f>>a) || a>4095)throw std::runtime_error("Invalid test input");pads[p]=a;}trace.push_back(pads);}}
+  std::map<unsigned,std::string> localHashes,remoteHashes;
+  std::map<unsigned,std::map<unsigned,std::string>> multiHashes;
+  auto compare=[&](){
+   if(multitap){for(auto it=multiHashes.begin();it!=multiHashes.end();){auto own=localHashes.find(it->first);if(own==localHashes.end()){++it;continue;}
+    for(auto &[slot,h]:it->second)if(h!=own->second)throw std::runtime_error("State mismatch for player "+std::to_string(slot+1)+" at frame "+std::to_string(it->first));
+    if(it->second.size()==(host?playerCount-1:1)){localHashes.erase(own);it=multiHashes.erase(it);}else ++it;
+   }if(localHashes.size()>10 || multiHashes.size()>10)throw std::runtime_error("Player state verification timed out");return;}
+   for(auto it=remoteHashes.begin();it!=remoteHashes.end();){auto own=localHashes.find(it->first);if(own==localHashes.end()){++it;continue;}if(own->second!=it->second)throw std::runtime_error("State mismatch at frame "+std::to_string(it->first));localHashes.erase(own);it=remoteHashes.erase(it);}if(localHashes.size()>10 || remoteHashes.size()>10)throw std::runtime_error("State verification timed out");};
   emu_frame rollbackOutput{};RollbackAudio correctedAudio;std::vector<int16_t> audible;
-  auto checkpoint=[&](unsigned f,const Bytes &snapshot){if(host && saveRecording && saveWriter){saveCheckpoint=snapshot;saveCheckpointFrame=baseFrame+f;journal.finalState=saveDigest(snapshot);saveWriter->submit(journal);}lastHash=hash(snapshot);localHashes[f]=lastHash;Bytes b;append(b,f,4);b.insert(b.end(),lastHash.begin(),lastHash.end());mustSend(host?guest:server,4,b);compare();if(traceLog)traceLog<<f<<" state "<<lastHash<<"\n";};
-  Rollback rollback(host?0:1,[&](){Bytes saved(stateSize);check(emu_state_copy(core,saved.data(),stateSize));return saved;},
+  auto checkpoint=[&](unsigned f,const Bytes &snapshot){if(host && saveRecording && saveWriter){saveCheckpoint=snapshot;saveCheckpointFrame=baseFrame+f;journal.finalState=saveDigest(snapshot);saveWriter->submit(journal);}lastHash=hash(snapshot);localHashes[f]=lastHash;Bytes b;append(b,f,4);b.insert(b.end(),lastHash.begin(),lastHash.end());sendPlayers(4,b);compare();if(traceLog)traceLog<<f<<" state "<<lastHash<<"\n";};
+  Rollback rollback(playerCount,localPlayer,[&](){Bytes saved(stateSize);check(emu_state_copy(core,saved.data(),stateSize));return saved;},
    [&](const Bytes &saved){check(emu_state_restore(core,saved.data(),uint32_t(saved.size())));correctedAudio.corrected();},
-   [&](unsigned,uint16_t p1,uint16_t p2,bool replay){emu_frame output{};check(emu_step(core,p1,p2,&output));if(!replay)rollbackOutput=output;},checkpoint,
-   [&](unsigned f,uint16_t p1,uint16_t p2){if(host && saveRecording){try{journal.append(baseFrame+f,p1,p2);}catch(const std::exception &e){saveRecording=false;std::lock_guard<std::mutex> lock(saveStatusMutex);saveError=e.what();}}});
+   [&](unsigned,const SaveInputs &pads,bool replay){emu_frame output{};check(stepPlayers(pads,&output));if(!replay)rollbackOutput=output;},checkpoint,
+   [&](unsigned f,const SaveInputs &pads){if(host && saveRecording){try{journal.append(baseFrame+f,pads);}catch(const std::exception &e){saveRecording=false;std::lock_guard<std::mutex> lock(saveStatusMutex);saveError=e.what();}}});
   InputTransport inputTransport;uint64_t inputPackets=0,inputSendDrops=0;auto lastInputSend=Clock::time_point{};
   auto sendInputs=[&](){if(!send(host?guest:server,3,inputTransport.packet(),false))++inputSendDrops;++inputPackets;lastInputSend=Clock::now();};
   auto nextFrame=[&](){return useRollback?rollback.next():schedule.next();};
   auto inputsReady=[&](){return useRollback?rollback.ready():schedule.ready();};
-  auto finished=[&](){return !useRollback || watcher || (rollback.confirmed()>=maxFrames && inputTransport.drained());};
+  auto finished=[&](){return !useRollback || watcher || (rollback.confirmed()>=maxFrames && (multitap || inputTransport.drained()));};
   auto telemetryTime=Clock::now();
   auto progress=Clock::now(),pace=progress;unsigned sampled=0;uint16_t sampledMask=0;bool hello=false;auto endWait=Clock::time_point{};auto firstStep=Clock::time_point{},lastStep=firstStep,waitingSince=firstStep;uint64_t coreNS=0,maxCoreNS=0,networkWaitNS=0;unsigned pacingResets=0;
   std::set<std::string> romDownloads;
@@ -460,16 +499,16 @@ int runSession(){@autoreleasepool{
    }
    net->RunCallbacks();std::vector<HSteamNetConnection> connections;for(auto &[c,p]:peers)connections.push_back(c);
    for(auto c:connections){auto it=peers.find(c);if(it==peers.end())continue;Peer &peer=it->second;
-    if(host && peer.authenticated){bool allowed=false;for(NSDictionary *p in admission[@"peers"])if(str(p[@"key"])==peer.key && str(p[@"role"])==peer.role)allowed=true;if(!allowed){if(c==guest)throw std::runtime_error("Player membership expired");net->CloseConnection(c,0,"membership ended",false);peers.erase(c);continue;}}
-    if(!peer.authenticated && now-peer.born>std::chrono::seconds(peer.transferringROM?180:(ice?30:10))){if(!host)throw std::runtime_error("Handshake timed out");net->CloseConnection(c,0,"timeout",false);peers.erase(c);continue;}
+    if(host && peer.authenticated){bool allowed=false;for(NSDictionary *p in admission[@"peers"])if(str(p[@"key"])==peer.key && str(p[@"role"])==peer.role)allowed=true;if(!allowed){if(peer.role=="guest")throw std::runtime_error("Player membership expired");net->CloseConnection(c,0,"membership ended",false);peers.erase(c);continue;}}
+    if(!peer.authenticated && now-peer.born>std::chrono::seconds(peer.transferringROM?180:(ice?(multitap?60:30):10))){if(!host)throw std::runtime_error("Handshake timed out");net->CloseConnection(c,0,"timeout",false);peers.erase(c);continue;}
     for(int m=0;m<64;m++){SteamNetworkingMessage_t *msg=nullptr;int count=net->ReceiveMessagesOnConnection(c,&msg,1);if(count<0)break;if(!count)break;Bytes b((uint8_t*)msg->m_pData,(uint8_t*)msg->m_pData+msg->m_cbSize);msg->Release();
      try{
       if(b.empty() || b.size()>300000)throw std::runtime_error("Invalid packet size");unsigned type=b[0];Bytes payload(b.begin()+1,b.end());
       if(host && (type==20 || type==22)) {
-       if(running || guest || ![config[@"allow_rom_transfer"] isEqual:@YES]) {
+       if(running || ![config[@"allow_rom_transfer"] isEqual:@YES]) {
         mustSend(c,24,json(@{@"error":@"The host has not allowed ROM sharing, or gameplay has already started."}));continue;
        }
-       auto allowedPlayer=[&](const std::string &key){for(NSDictionary *p in admission[@"peers"])if(str(p[@"key"])==key && [p[@"role"] isEqual:@"guest"])return true;return false;};
+       auto allowedPlayer=[&](const std::string &key){for(NSDictionary *p in admission[@"peers"])if(str(p[@"key"])==key && [p[@"role"] isEqual:@"guest"] && (!multitap || ([admission[@"room"][@"rom_request"][@"status"] isEqual:@"approved"] && [admission[@"room"][@"rom_request"][@"slot"] unsignedIntValue]==[p[@"slot"] unsignedIntValue])))return true;return false;};
        if(type==20){
         NSDictionary *h=object(payload);if(![h[@"key"] isKindOfClass:NSString.class] || [h[@"key"] length]>256)throw std::runtime_error("Invalid ROM request key");std::string key=str(h[@"key"]);
         if(peer.authenticated || peer.transferringROM || ![h[@"session"] isEqual:ns(sessionID)] || ![h[@"compatibility"] isEqual:compat] || !allowedPlayer(key) || romDownloads.count(key))throw std::runtime_error("ROM transfer not authorized");
@@ -487,18 +526,18 @@ int runSession(){@autoreleasepool{
       }
       if(serveROM)throw std::runtime_error("ROM transfer is in progress; wait for the host to Start Game");
       if(peer.transferringROM)throw std::runtime_error("ROM transfer must finish before gameplay reconnects");
-      if(type==1 && host && !peer.authenticated){NSDictionary *h=object(payload);if(![h[@"stream_version"] isEqual:@8] || ![h[@"session"] isEqual:ns(sessionID)] || ![h[@"compatibility"] isEqual:compat])throw std::runtime_error("Incompatible peer");std::string key=str(h[@"key"]),claimed=str(h[@"role"]);if(claimed=="guest" && ![h[@"netcode"] isEqual:useRollback?@"rollback-v3":@"delay-v2"])throw std::runtime_error("Player netcode differs; update both Macs");bool allowed=false;for(NSDictionary *p in admission[@"peers"])if(str(p[@"key"])==key && str(p[@"role"])==claimed)allowed=true;
+      if(type==1 && host && !peer.authenticated){NSDictionary *h=object(payload);if(![h[@"stream_version"] isEqual:@8] || ![h[@"session"] isEqual:ns(sessionID)] || ![h[@"compatibility"] isEqual:compat])throw std::runtime_error("Incompatible peer");std::string key=str(h[@"key"]),claimed=str(h[@"role"]);if(claimed=="guest" && ![h[@"netcode"] isEqual:multitap?@"rollback-mp-v1":useRollback?@"rollback-v3":@"delay-v2"])throw std::runtime_error("Player netcode differs; update both Macs");bool allowed=false;for(NSDictionary *p in admission[@"peers"])if(str(p[@"key"])==key && str(p[@"role"])==claimed){allowed=true;peer.slot=p[@"slot"]?[p[@"slot"] unsignedIntValue]:1;}
        if(!allowed || (claimed!="guest" && claimed!="spectator"))throw std::runtime_error("Unadmitted peer");for(auto &[other,p]:peers)if(other!=c && p.authenticated && p.key==key)throw std::runtime_error("Duplicate peer");
-       if(claimed=="guest" && (guest || running))throw std::runtime_error("Player slot occupied");peer.key=key;peer.role=claimed;peer.authenticated=true;connecting("Player connected — synchronizing game…");if(claimed=="guest")guest=c;
+       if(claimed=="guest" && (running || peer.slot==0 || peer.slot>=playerCount || (!multitap && guest)))throw std::runtime_error("Player slot occupied");peer.key=key;peer.role=claimed;peer.authenticated=true;connecting("Player connected — synchronizing game…");if(claimed=="guest"){for(auto &[other,p]:peers)if(other!=c && p.authenticated && p.role=="guest" && p.slot==peer.slot)throw std::runtime_error("Duplicate player slot");if(!guest)guest=c;}
        // GNS defaults to 256 KiB/s; compressed LAN video plus stereo PCM
        // exceeds that. Current PCM plus twelve history blocks uses about 28 KiB/frame.
        // 4 MiB/s permits about 68 KiB/frame at 60 Hz, leaving video/packet headroom.
        // Keep the 256 KiB queue bound so a slow watcher cannot accumulate latency.
        // Player connections retain their independent input/control budget.
        if(claimed=="spectator"){SteamNetworkingUtils()->SetConnectionConfigValueInt32(c,k_ESteamNetworkingConfig_SendRateMin,4*1024*1024);SteamNetworkingUtils()->SetConnectionConfigValueInt32(c,k_ESteamNetworkingConfig_SendRateMax,4*1024*1024);}
-       mustSend(c,2,json(@{@"key":ns(hostKey),@"session":ns(sessionID),@"compatibility":compat,@"stream_version":@8,@"netcode":useRollback?@"rollback-v3":@"delay-v2",@"resume_bytes":@(resumeBytes.size()),@"resume_frames":@(baseFrame),@"resume_sha256":resumeBytes.empty()?@"":ns(saveDigestHex(saveDigest(resumeBytes)))}));continue;
+       mustSend(c,2,json(@{@"key":ns(hostKey),@"session":ns(sessionID),@"compatibility":compat,@"stream_version":@8,@"netcode":multitap?@"rollback-mp-v1":useRollback?@"rollback-v3":@"delay-v2",@"resume_bytes":@(resumeBytes.size()),@"resume_frames":@(baseFrame),@"resume_sha256":resumeBytes.empty()?@"":ns(saveDigestHex(saveDigest(resumeBytes)))}));continue;
       }
-      if(type==2 && !host && !peer.authenticated){NSDictionary *h=object(payload);if(![h[@"stream_version"] isEqual:@8] || ![h[@"key"] isEqual:ns(hostKey)] || ![h[@"session"] isEqual:ns(sessionID)] || ![h[@"compatibility"] isEqual:compat])throw std::runtime_error("Host verification failed");if(!watcher && ![h[@"netcode"] isEqual:useRollback?@"rollback-v3":@"delay-v2"])throw std::runtime_error("Player netcode differs; update both Macs");peer.authenticated=true;connecting("Player connected — synchronizing game…");
+      if(type==2 && !host && !peer.authenticated){NSDictionary *h=object(payload);if(![h[@"stream_version"] isEqual:@8] || ![h[@"key"] isEqual:ns(hostKey)] || ![h[@"session"] isEqual:ns(sessionID)] || ![h[@"compatibility"] isEqual:compat])throw std::runtime_error("Host verification failed");if(!watcher && ![h[@"netcode"] isEqual:multitap?@"rollback-mp-v1":useRollback?@"rollback-v3":@"delay-v2"])throw std::runtime_error("Player netcode differs; update both Macs");peer.authenticated=true;connecting("Player connected — synchronizing game…");
        if(!watcher){
         if(![h[@"resume_bytes"] isKindOfClass:NSNumber.class] || ![h[@"resume_frames"] isKindOfClass:NSNumber.class] || ![h[@"resume_sha256"] isKindOfClass:NSString.class])throw std::runtime_error("Invalid saved-game offer");
         auto count=[h[@"resume_bytes"] unsignedLongLongValue],frames=[h[@"resume_frames"] unsignedLongLongValue];
@@ -510,26 +549,33 @@ int runSession(){@autoreleasepool{
       // Only the authenticated player can request journal chunks, and only
       // the authenticated host can supply them. One request in flight bounds
       // queued reliable data; remote bytes are never passed to state_restore.
-      if(type==10 && host && c==guest && !running && !resumeBytes.empty()){
+      if(type==10 && host && peer.role=="guest" && !running && !resumeBytes.empty()){
        Reader request{payload};size_t offset=size_t(request.get(4));request.end();if(offset>=resumeBytes.size() || offset%SaveTransfer::chunkSize())throw std::runtime_error("Invalid saved-game chunk request");
        size_t count=std::min(SaveTransfer::chunkSize(),resumeBytes.size()-offset);Bytes chunk;append(chunk,offset,4);chunk.insert(chunk.end(),resumeBytes.begin()+offset,resumeBytes.begin()+offset+count);mustSend(c,11,chunk);progress=Clock::now();continue;
       }
       if(type==11 && !host && !watcher && c==server && !running && !replayActive && !replayDone){
        Reader chunk{payload};size_t offset=size_t(chunk.get(4));Bytes bytes(payload.begin()+chunk.pos,payload.end());resumeTransfer.put(offset,bytes);
-       if(resumeTransfer.complete()){journal=SaveJournal::decode(resumeTransfer.finish(),saveIdentity);if(journal.frames()!=resumeTotal)throw std::runtime_error("Saved-game frame count differs from offer");baseFrame=journal.frames();replayActive=true;}
+       if(resumeTransfer.complete()){journal=SaveJournal::decode(resumeTransfer.finish(),saveIdentity);if(journal.players!=playerCount)throw std::runtime_error("Saved player count differs");if(journal.frames()!=resumeTotal)throw std::runtime_error("Saved-game frame count differs from offer");baseFrame=journal.frames();replayActive=true;}
        else{Bytes request;append(request,resumeTransfer.received(),4);mustSend(c,10,request);}progress=Clock::now();continue;
       }
-      if(type==6 && host && c==guest && !running){
+      if(type==6 && host && peer.role=="guest" && !running){
        std::string expected=baseFrame?saveDigestHex(journal.finalState):str(compat[@"initial_state_sha256"]);
-       if(payload.size()!=64 || std::string(payload.begin(),payload.end())!=expected)throw std::runtime_error("Player restored a different saved-game state");guestReady=true;progress=Clock::now();continue;
+       if(payload.size()!=64 || std::string(payload.begin(),payload.end())!=expected)throw std::runtime_error("Player restored a different saved-game state");peer.ready=true;guestReady=true;progress=Clock::now();continue;
       }
       if(type==7 && !host && !watcher && !running){if(!replayDone || !readySent || payload.size()!=64 || std::string(payload.begin(),payload.end())!=resumeHash)throw std::runtime_error("Invalid restored start state");running=true;progress=pace=Clock::now();continue;}
-      if(type==3 && !watcher && (running || useRollback) && (host?c==guest:c==server)){
+      if(type==3 && !multitap && !watcher && (running || useRollback) && (host?c==guest:c==server)){
        // An unreliable input may overtake reliable START. Authentication and
        // the bounded input window are enough to buffer it before simulation.
        if(useRollback){for(auto [f,mask]:inputTransport.receive(payload,nextFrame()))rollback.putRemote(f,mask);}
        else{Reader r{payload};unsigned f=r.get(4);uint16_t mask=r.get(2);r.end();if(f<=delay)throw std::runtime_error("Invalid input frame");schedule.put(host?1:0,f,mask);}continue;}
-      if(type==4 && !watcher && running && (host?c==guest:c==server)){Reader r{payload};unsigned f=r.get(4);if(!f || f%60 || f>nextFrame()+120 || f+120<nextFrame() || payload.size()!=68)throw std::runtime_error("Invalid state checkpoint");std::string h(payload.begin()+4,payload.end());if(remoteHashes.count(f) && remoteHashes[f]!=h)throw std::runtime_error("Conflicting checkpoint");remoteHashes[f]=h;compare();continue;}
+      if(type==13 && multitap && !watcher && (host?peer.role=="guest":c==server)){
+       Reader r{payload};unsigned slot=r.get(1),f=r.get(4);uint16_t mask=r.get(2);r.end();
+       if(slot>=playerCount || slot==localPlayer || (host && slot!=peer.slot))throw std::runtime_error("Invalid input owner");
+       rollback.putRemote(slot,f,mask);
+       if(host)sendPlayers(13,payload,c);
+       continue;
+      }
+      if(type==4 && !watcher && running && (host?peer.role=="guest":c==server)){Reader r{payload};unsigned f=r.get(4);if(!f || f%60 || f>nextFrame()+120 || f+120<nextFrame() || payload.size()!=68)throw std::runtime_error("Invalid state checkpoint");std::string h(payload.begin()+4,payload.end());if(multitap){auto &hashes=multiHashes[f];unsigned slot=host?peer.slot:0;if(hashes.count(slot) && hashes[slot]!=h)throw std::runtime_error("Conflicting player checkpoint");hashes[slot]=h;compare();continue;}if(remoteHashes.count(f) && remoteHashes[f]!=h)throw std::runtime_error("Conflicting checkpoint");remoteHashes[f]=h;compare();continue;}
       if(type==8 && watcher && c==server){auto bundle=decodeStream(payload);unsigned f=bundle.frame,w=bundle.width,h=bundle.height;
        if(f>completed){uint64_t recovered=0,missing=0;Bytes audible=streamAudio(bundle,completed,recovered,missing);recoveredAudio+=recovered;unrecoveredAudio+=missing;bool gap=completed==0 || f!=completed+1;if(completed && gap){++audioGaps;++streamGaps;}++streamFrames;completed=f;lastVideo=hash(bundle.pixels);lastAudio=hash(bundle.audio);receivedAudioSamples+=bundle.audio.size()/4;
         lastPixels=std::move(bundle.pixels);lastW=w;lastH=h;received++;progress=Clock::now();if(firstStep==Clock::time_point{})firstStep=progress;else sessionFPS=(received-1)/std::chrono::duration<double>(progress-firstStep).count();
@@ -538,16 +584,16 @@ int runSession(){@autoreleasepool{
        }continue;}
 
       throw std::runtime_error("Role cannot send this message");
-     }catch(const std::exception&){if(!host || c==guest)throw;net->CloseConnection(c,0,"invalid watcher",false);peers.erase(c);break;}
+     }catch(const std::exception&){if(!host || peer.role=="guest")throw;net->CloseConnection(c,0,"invalid watcher",false);peers.erase(c);break;}
     }
    }
-   if(!host && !hello && peers.count(server) && peers[server].connected && now-peers[server].born>std::chrono::seconds(5)){mustSend(server,1,json(@{@"key":ns(playKey),@"role":ns(role),@"session":ns(sessionID),@"compatibility":compat,@"stream_version":@8,@"netcode":useRollback?@"rollback-v3":@"delay-v2"}));hello=true;}
+   if(!host && !hello && peers.count(server) && peers[server].connected && now-peers[server].born>std::chrono::seconds(5)){mustSend(server,1,json(@{@"key":ns(playKey),@"role":ns(role),@"session":ns(sessionID),@"compatibility":compat,@"stream_version":@8,@"netcode":multitap?@"rollback-mp-v1":useRollback?@"rollback-v3":@"delay-v2"}));hello=true;}
    // Rebuild saved state in small slices on the sole emulator owner. HTTP
    // workers keep leases alive and GNS callbacks are serviced between slices.
    // Replayed output never enters the player or spectator presentation queues.
    if(replayActive){
     auto deadline=Clock::now()+std::chrono::milliseconds(2);
-    do{const auto &entry=journal.runs().at(runIndex);emu_frame ignored{};check(emu_step(core,entry.player1,entry.player2,&ignored));++replayed;++runOffset;
+    do{const auto &entry=journal.runs().at(runIndex);emu_frame ignored{};check(stepPlayers(entry.inputs(),&ignored));++replayed;++runOffset;
      if(runOffset==entry.frames){++runIndex;runOffset=0;}resumeFrame=replayed;
     }while(replayed<journal.frames() && Clock::now()<deadline && !closeRequested());
     progress=Clock::now();
@@ -556,15 +602,16 @@ int runSession(){@autoreleasepool{
      if(!host){Bytes ready(resumeHash.begin(),resumeHash.end());mustSend(server,6,ready);readySent=true;}
     }
    }
-   if(host && guestReady && replayDone && !running){SteamNetConnectionRealTimeStatus_t startStats{};int rtt=net->GetConnectionRealTimeStatus(guest,&startStats,0,nullptr)==k_EResultOK?startStats.m_nPing:-1;
-    Bytes start(resumeHash.begin(),resumeHash.end());mustSend(guest,7,start);running=true;progress=Clock::now();auto offset=hostStartOffset(rtt);hostStartOffsetMS=offset.count()/1000.0;pace=progress+offset;
+   unsigned readyPlayers=0;for(auto &[c,p]:peers)if(p.authenticated && p.role=="guest" && p.ready)++readyPlayers;
+   if(host && readyPlayers==playerCount-1 && replayDone && !running){SteamNetConnectionRealTimeStatus_t startStats{};int rtt=net->GetConnectionRealTimeStatus(guest,&startStats,0,nullptr)==k_EResultOK?startStats.m_nPing:-1;
+    Bytes start(resumeHash.begin(),resumeHash.end());sendPlayers(7,start);running=true;progress=Clock::now();auto offset=hostStartOffset(rtt);hostStartOffsetMS=offset.count()/1000.0;pace=progress+offset;
    }
    if(!running && Clock::now()-preparationStarted>std::chrono::minutes(10))throw std::runtime_error("Saved-game/session preparation timed out");
    if(!watcher && running && useRollback){rollback.reconcile();rollbackCount=rollback.rollbackCount;rollbackFrames=rollback.replayedFrames;rollbackDepth=rollback.maximumDepth;confirmedFrame=rollback.confirmed();}
    if(!watcher && running && (!maxFrames || completed<maxFrames)){
     if(!inputsReady()){if(waitingSince==Clock::time_point{})waitingSince=Clock::now();}
     else if(waitingSince!=Clock::time_point{}){networkWaitNS+=std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now()-waitingSince).count();waitingSince=Clock::time_point{};}
-    unsigned frame=nextFrame();if(inputSampleDue(sampled,frame,now,pace) && (!useRollback || inputsReady())){uint16_t mask=trace.empty()?liveInput.load():trace.at(baseFrame+frame-1)[host?0:1];unsigned target=useRollback?frame:schedule.sampleFrame();inputSampleTimes[target]=Clock::now();if(!useRollback){schedule.put(host?0:1,target,mask);Bytes b;append(b,target,4);append(b,mask,2);mustSend(host?guest:server,3,b);}else{rollbackOutput={};inputTransport.sample(target,mask);sendInputs();}sampled=frame;sampledMask=mask;}
+    unsigned frame=nextFrame();if(inputSampleDue(sampled,frame,now,pace) && (!useRollback || inputsReady())){uint16_t mask=trace.empty()?liveInput.load():trace.at(baseFrame+frame-1)[localPlayer];unsigned target=useRollback?frame:schedule.sampleFrame();inputSampleTimes[target]=Clock::now();if(!useRollback){schedule.put(host?0:1,target,mask);Bytes b;append(b,target,4);append(b,mask,2);mustSend(host?guest:server,3,b);}else{rollbackOutput={};if(multitap){Bytes b;append(b,localPlayer,1);append(b,target,4);append(b,mask,2);sendPlayers(13,b);++inputPackets;}else{inputTransport.sample(target,mask);sendInputs();}}sampled=frame;sampledMask=mask;}
     if(inputsReady() && sampled==frame && now>=pace){auto stamp=inputSampleTimes.find(frame);if(stamp!=inputSampleTimes.end()){inputQueueMS=std::chrono::duration<double,std::milli>(Clock::now()-stamp->second).count();inputSampleTimes.erase(stamp);}std::array<uint16_t,2> input{};if(!useRollback)input=schedule.take();emu_frame output{};auto coreStart=Clock::now();if(firstStep==Clock::time_point{})firstStep=coreStart;
      if(useRollback){rollback.advance(sampledMask);output=rollbackOutput;audible=correctedAudio.forward(output.audio,output.audio_frames);output.audio=audible.data();}else check(emu_step(core,input[0],input[1],&output));completed=frame;progress=lastStep=Clock::now();
      auto elapsed=std::chrono::duration_cast<std::chrono::nanoseconds>(lastStep-coreStart).count();coreNS+=elapsed;maxCoreNS=std::max(maxCoreNS,uint64_t(elapsed));
@@ -574,7 +621,7 @@ int runSession(){@autoreleasepool{
      if(progress-pace>interval*4){pace=progress+interval;++pacingResets;}
      if(frame>1)sessionFPS=(frame-1)/std::chrono::duration<double>(lastStep-firstStep).count();
      lastW=output.width;lastH=output.height;lastPixels.resize(lastW*lastH*2);for(unsigned y=0;y<lastH;y++)memcpy(lastPixels.data()+y*lastW*2,output.video+y*output.pitch,lastW*2);lastVideo=hash(lastPixels);
-     if(!useRollback && frame%60==0){lastHash=stateHash();localHashes[frame]=lastHash;Bytes b;append(b,frame,4);b.insert(b.end(),lastHash.begin(),lastHash.end());mustSend(host?guest:server,4,b);compare();if(traceLog)traceLog<<frame<<" state "<<lastHash<<"\n";}
+     if(!useRollback && frame%60==0){lastHash=stateHash();localHashes[frame]=lastHash;Bytes b;append(b,frame,4);b.insert(b.end(),lastHash.begin(),lastHash.end());sendPlayers(4,b);compare();if(traceLog)traceLog<<frame<<" state "<<lastHash<<"\n";}
      if(host){for(unsigned i=0;i<output.audio_frames*2;i++)append(pendingAudio,uint16_t(output.audio[i]),2);}
      if(host){std::vector<HSteamNetConnection> watchers;for(auto &[c,p]:peers)if(p.authenticated && p.role=="spectator")watchers.push_back(c);lastAudio=hash(pendingAudio);encoder->submit(lastPixels,pendingAudio,audioHistory,lastW,lastH,frame,watchers);for(unsigned i=SpectatorHistory-1;i>0;--i)audioHistory[i]=std::move(audioHistory[i-1]);audioHistory[0]=std::move(pendingAudio);pendingAudio.clear();if(traceLog)traceLog<<frame<<" video "<<lastVideo<<"\n"<<frame<<" audio "<<lastAudio<<"\n";}
      presentFrame(lastPixels,lastW,lastH,frame,role,&output);
@@ -582,7 +629,7 @@ int runSession(){@autoreleasepool{
    }
    // Continue redundant delivery and ACKs when prediction is exhausted and
    // while draining a finite run. A dropped final input/ACK cannot deadlock it.
-   if(useRollback && !watcher && running && Clock::now()-lastInputSend>=std::chrono::milliseconds(16))sendInputs();
+   if(useRollback && !multitap && !watcher && running && Clock::now()-lastInputSend>=std::chrono::milliseconds(16))sendInputs();
    if(Clock::now()-telemetryTime>=std::chrono::seconds(1)){
     telemetryTime=Clock::now();if(saveWriter){saveCompletedFrame=saveWriter->completedFrames();auto issue=saveWriter->error();if(!issue.empty()){std::lock_guard<std::mutex> lock(saveStatusMutex);saveError=issue;}}auto peer=host?guest:server;SteamNetConnectionInfo_t info{};SteamNetConnectionRealTimeStatus_t stats{};
     if(peer && net->GetConnectionInfo(peer,&info) && net->GetConnectionRealTimeStatus(peer,&stats,0,nullptr)==k_EResultOK){selectedRoute=(info.m_nFlags&k_nSteamNetworkConnectionInfoFlags_Relayed)?2:1;networkRTT=stats.m_nPing;networkQuality=stats.m_flConnectionQualityLocal;}
@@ -592,7 +639,7 @@ int runSession(){@autoreleasepool{
   }}
   finalSave.finish();
   std::string finalSaveError;{std::lock_guard<std::mutex> lock(saveStatusMutex);finalSaveError=saveError;}
-  NSDictionary *performance=@{@"installed_turn_expires_at":@(installedTURNExpiresAt.load()),@"lobby_transient_retries":@(lobbyTransientRetries.load()),@"signal_transient_retries":@(signalTransientRetries.load()),@"lobby_reconnecting":@(lobbyRetrying.load() || signalRetrying.load()),@"save_completed_frame":@(saveCompletedFrame.load()),@"save_error":ns(finalSaveError),@"resume_frame":@(resumeFrame.load()),@"resume_total":@(resumeTotal.load()),@"netcode":useRollback?@"rollback-v3":@"delay-v2",@"confirmed_frame":@(rollback.confirmed()),@"input_packets":@(inputPackets),@"input_send_drops":@(inputSendDrops),@"input_receipt_frame":@(inputTransport.received()),@"input_acknowledged_frame":@(inputTransport.acknowledged()),@"input_duplicate_masks":@(inputTransport.duplicateInputs),@"rollback_count":@(rollback.rollbackCount),@"replayed_frames":@(rollback.replayedFrames),@"maximum_rollback_depth":@(rollback.maximumDepth),@"route":selectedRoute==2?@"relay":selectedRoute==1?@"direct":@"unknown",@"rtt_ms":@(networkRTT.load()),@"connection_quality":@(networkQuality.load()),@"simulation_fps":@(watcher?0:sessionFPS.load()),@"received_video_fps":@(watcher?sessionFPS.load():0),@"average_core_ms":@(completed?coreNS/1e6/completed:0),@"maximum_core_ms":@(maxCoreNS/1e6),@"network_wait_ms":@(networkWaitNS/1e6),@"pacing_resets":@(pacingResets),@"encoder":encoder?encoder->metrics():@{}};
+  NSDictionary *performance=@{@"installed_turn_expires_at":@(installedTURNExpiresAt.load()),@"lobby_transient_retries":@(lobbyTransientRetries.load()),@"signal_transient_retries":@(signalTransientRetries.load()),@"lobby_reconnecting":@(lobbyRetrying.load() || signalRetrying.load()),@"save_completed_frame":@(saveCompletedFrame.load()),@"save_error":ns(finalSaveError),@"resume_frame":@(resumeFrame.load()),@"resume_total":@(resumeTotal.load()),@"netcode":multitap?@"rollback-mp-v1":useRollback?@"rollback-v3":@"delay-v2",@"confirmed_frame":@(rollback.confirmed()),@"input_packets":@(inputPackets),@"input_send_drops":@(inputSendDrops),@"input_receipt_frame":@(inputTransport.received()),@"input_acknowledged_frame":@(inputTransport.acknowledged()),@"input_duplicate_masks":@(inputTransport.duplicateInputs),@"rollback_count":@(rollback.rollbackCount),@"replayed_frames":@(rollback.replayedFrames),@"maximum_rollback_depth":@(rollback.maximumDepth),@"route":selectedRoute==2?@"relay":selectedRoute==1?@"direct":@"unknown",@"rtt_ms":@(networkRTT.load()),@"connection_quality":@(networkQuality.load()),@"simulation_fps":@(watcher?0:sessionFPS.load()),@"received_video_fps":@(watcher?sessionFPS.load():0),@"average_core_ms":@(completed?coreNS/1e6/completed:0),@"maximum_core_ms":@(maxCoreNS/1e6),@"network_wait_ms":@(networkWaitNS/1e6),@"pacing_resets":@(pacingResets),@"encoder":encoder?encoder->metrics():@{}};
   if(!reportPath.empty()){NSDictionary *r=@{@"result":@"PASS",@"performance":performance,@"role":ns(role),@"frames":@(completed),@"received_video_frames":@(received),@"received_audio_samples":@(receivedAudioSamples),@"audio_discontinuities":@(audioGaps),@"recovered_audio_frames":@(recoveredAudio.load()),@"unrecovered_audio_frames":@(unrecoveredAudio.load()),@"audio_sha256":ns(lastAudio),@"state_sha256":ns(lastHash),@"video_sha256":ns(lastVideo)};auto b=json(r);std::ofstream f(reportPath);f.write((char*)b.data(),b.size());if(!lastPixels.empty())[[bitmap(lastPixels,lastW,lastH) representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:ns(reportPath+".png") atomically:YES];}
   encoder.reset();signalWorker.reset();lobbyWorker.reset();
   if(launched){try{api(@"stop",@"POST",@{});}catch(...) {}}

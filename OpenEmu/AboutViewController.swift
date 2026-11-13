@@ -89,8 +89,14 @@ final class AboutViewController: NSViewController {
     }
     override func viewWillAppear() {
         super.viewWillAppear()
-        view.window?.setContentSize(NSSize(width: 680, height: 440))
-        view.window?.title = "About OpenEmu-NX"
+        guard let window = view.window else { return }
+        // The inherited storyboard extends content beneath the traffic lights.
+        // Keep the banner in the content area, below the native title bar.
+        window.styleMask.remove(.fullSizeContentView)
+        window.titlebarAppearsTransparent = false
+        window.titleVisibility = .visible
+        window.title = "About OpenEmu-NX"
+        window.setContentSize(NSSize(width: 680, height: 440))
     }
     @objc private func openProject() { open(AppDelegate.websiteAddress) }
     @objc private func openReleases() { open(AppDelegate.releaseNotesAddress) }

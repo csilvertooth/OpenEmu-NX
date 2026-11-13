@@ -312,7 +312,7 @@ extension PrefCoresController: NSTableViewDelegate {
 
         case .enabledColumn:
             let cell = NSTableCellView()
-            let button = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleLibrarySystem(_:)))
+            let button = NXDesignCheckbox(checkboxWithTitle: "", target: self, action: #selector(toggleLibrarySystem(_:)))
             button.identifier = NSUserInterfaceItemIdentifier(entry.systemIdentifier)
             button.setAccessibilityLabel("Show \(entry.systemName) in Library")
             button.toolTip = "Show or hide this console in the library sidebar. Games, saves, and installed cores are kept."

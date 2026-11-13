@@ -562,3 +562,10 @@ int sound_context_load(uint8 *state)
 
   return bufferptr;
 }
+
+/* Copyright (c) 2026 Chris Silvertooth. Frame-boundary rollback audio history. */
+int nx_fm_snapshot(unsigned char *p, int load) {
+ if(load) { memcpy(fm_last,p,8);memcpy(&fm_cycles_busy,p+8,4);fm_ptr=fm_buffer; }
+ else { memcpy(p,fm_last,8);memcpy(p+8,&fm_cycles_busy,4); }
+ return 12;
+}

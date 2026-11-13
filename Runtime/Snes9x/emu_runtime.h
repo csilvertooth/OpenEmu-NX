@@ -31,6 +31,9 @@ EMU_API int32_t emu_create(uint32_t abi, const uint8_t *rom, uint32_t length, em
 EMU_API uint32_t emu_frame_duration_us(emu_runtime *runtime);
 EMU_API void emu_destroy(emu_runtime *runtime);
 EMU_API int32_t emu_step(emu_runtime *runtime, uint16_t player1, uint16_t player2, emu_frame *out);
+/* Optional ABI 1 extension. NX_NETPLAY_PLAYERS selects 2..5 before create.
+   The selected topology is part of the profile and cannot change mid-session. */
+EMU_API int32_t emu_step_players(emu_runtime *runtime, const uint16_t *players, uint32_t count, emu_frame *out);
 EMU_API int32_t emu_state_size(emu_runtime *runtime, uint32_t *size);
 EMU_API int32_t emu_state_copy(emu_runtime *runtime, uint8_t *out, uint32_t capacity);
 /* State format: EMUSNES1 header (16 bytes) plus unmodified Snes9x snapshot.

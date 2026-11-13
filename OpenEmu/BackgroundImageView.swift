@@ -26,6 +26,8 @@ import Cocoa
 
 final class BackgroundImageView: NSView {
 
+    var designBackground: NSColor? { didSet { needsDisplay = true } }
+
     @IBInspectable var background: NSImage?
     @IBInspectable var image: NSImage?
 
@@ -60,8 +62,37 @@ final class BackgroundImageView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        if let designBackground {
+            designBackground.setFill(); bounds.fill()
+            drawControllerBackdrop()
+            return
+        }
         background?.draw(in: dirtyRect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: isFlipped, hints: nil)
         image?.draw(in: dirtyRect, from: dirtyRect, operation: .sourceOver, fraction: 1, respectFlipped: isFlipped, hints: nil)
+    }
+
+    // Resolution-independent ambient lighting and circuit traces behind the controller.
+    private func drawControllerBackdrop() {
+        let stage = NSRect(x: 0, y: 0, width: bounds.width * 0.68, height: bounds.height)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: stage).addClip()
+        let glow = NSGradient(starting: NSColor(calibratedRed: 0.34, green: 0.18, blue: 0.60, alpha: 0.65), ending: .clear)
+        glow?.draw(fromCenter: NSPoint(x: stage.midX * 0.65, y: stage.midY), radius: 0,
+                   toCenter: NSPoint(x: stage.midX, y: stage.midY), radius: stage.width * 0.65, options: [])
+        let blue = NSGradient(starting: NSColor(calibratedRed: 0.08, green: 0.45, blue: 0.65, alpha: 0.32), ending: .clear)
+        blue?.draw(fromCenter: NSPoint(x: stage.maxX * 0.84, y: stage.height * 0.3), radius: 0,
+                   toCenter: NSPoint(x: stage.maxX * 0.84, y: stage.height * 0.3), radius: stage.width * 0.48, options: [])
+        for index in 0..<7 {
+            let y = stage.height * (0.12 + CGFloat(index) * 0.12)
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: 0, y: y))
+            path.line(to: NSPoint(x: stage.width * 0.18, y: y))
+            path.line(to: NSPoint(x: stage.width * 0.29, y: y + 32))
+            path.line(to: NSPoint(x: stage.width, y: y + 32))
+            NXDesign.accent.withAlphaComponent(0.07).setStroke()
+            path.lineWidth = 1; path.stroke()
+        }
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     override var isFlipped: Bool { false }

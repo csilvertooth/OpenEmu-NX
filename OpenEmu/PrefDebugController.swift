@@ -179,7 +179,7 @@ final class PrefDebugController: NSViewController {
             let key = item.key
             let negated = item.negated
             
-            let checkbox = NSButton(checkboxWithTitle: label, target: nil, action: nil)
+            let checkbox = NXDesignCheckbox(checkboxWithTitle: label, target: nil, action: nil)
             checkbox.title = label
             
             var options: [NSBindingOption : Any] = [.continuouslyUpdatesValue: true as NSNumber]

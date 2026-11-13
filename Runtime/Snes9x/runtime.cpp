@@ -15,11 +15,12 @@
 #include <memory>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 
 struct emu_runtime {
     std::vector<uint16_t> video;
     std::vector<int16_t> audio;
-    uint32_t state_size = 0;
+    uint32_t state_size = 0, players = 2;
     bool memory = false, apu = false, graphics = false, failed = false;
 };
 static emu_runtime *active = nullptr;
@@ -42,11 +43,21 @@ static void cleanup(emu_runtime *r) {
     if (r->memory) Memory.Deinit();
 }
 uint32_t emu_runtime_abi(void) { return EMU_RUNTIME_ABI; }
-const char *emu_runtime_profile(void) { return "snes9x-1.63-general-v2-abi1"; }
+static unsigned configuredPlayers() {
+    const char *value = getenv("NX_NETPLAY_PLAYERS");
+    if (!value) return 2;
+    return value[0]>='2' && value[0]<='5' && !value[1] ? unsigned(value[0]-'0') : 0;
+}
+const char *emu_runtime_profile(void) {
+    static const char *profiles[]={"invalid", "invalid", "snes9x-1.63-general-v2-abi1",
+        "snes9x-1.63-mp3-v1-abi1", "snes9x-1.63-mp4-v1-abi1", "snes9x-1.63-mp5-v1-abi1"};
+    return profiles[active ? active->players : configuredPlayers()];
+}
 int32_t emu_create(uint32_t abi, const uint8_t *rom, uint32_t length, emu_runtime **out) {
     if (!out) return EMU_ARGUMENT;
     *out = nullptr;
     if (abi != EMU_RUNTIME_ABI) return EMU_ABI;
+    if (!configuredPlayers()) return EMU_ARGUMENT;
     if (!rom || !length) return EMU_ARGUMENT;
     if (active) return EMU_BUSY;
     if (used) return EMU_RESTART_REQUIRED;
@@ -54,6 +65,7 @@ int32_t emu_create(uint32_t abi, const uint8_t *rom, uint32_t length, emu_runtim
     std::unique_ptr<emu_runtime> r;
     try {
         r.reset(new emu_runtime);
+        r->players = configuredPlayers();
         r->video.resize(MAX_SNES_WIDTH * MAX_SNES_HEIGHT);
         r->audio.reserve(8192);
         used = true;
@@ -75,7 +87,7 @@ int32_t emu_create(uint32_t abi, const uint8_t *rom, uint32_t length, emu_runtim
         GFX.InfoString.clear(); GFX.InfoStringTimeout = 0;
         S9xUnmapAllControls();
         const char *keys[] = {"Up","Down","Left","Right","A","B","X","Y","L","R","Start","Select"};
-        for (int p=1; p<=2; ++p) for (int b=0; b<12; ++b) {
+        for (int p=1; p<=5; ++p) for (int b=0; b<12; ++b) {
             char command[32]; snprintf(command, sizeof(command), "Joypad%d %s", p, keys[b]);
             S9xMapButton((p<<16)|b, S9xGetCommandT(command), false);
         }
@@ -86,7 +98,11 @@ int32_t emu_create(uint32_t abi, const uint8_t *rom, uint32_t length, emu_runtim
         S9xSetSamplesAvailableCallback(samples, r.get());
         if (!Memory.LoadROMMem(rom, length)) { cleanup(r.get()); return EMU_ROM; }
         S9xSetController(0, CTL_JOYPAD, 0, 0, 0, 0);
-        S9xSetController(1, CTL_JOYPAD, 1, 0, 0, 0);
+        if (r->players>2) S9xSetController(1, CTL_MP5, 1, 2, r->players>=4?3:-1, r->players>=5?4:-1);
+        else S9xSetController(1, CTL_JOYPAD, 1, 0, 0, 0);
+        // Commit multitap topology before the initial rollback snapshot. The core
+        // otherwise defers it until a latch edge, but restore resets it immediately.
+        if (r->players>2) S9xControlsSoftReset();
         GFX.Screen = r->video.data();
         r->state_size = 16 + S9xFreezeSize();
         active = r.release(); *out = active;
@@ -99,15 +115,18 @@ void emu_destroy(emu_runtime *r) {
     cleanup(r); active = nullptr; delete r;
 }
 int32_t emu_step(emu_runtime *r, uint16_t p1, uint16_t p2, emu_frame *out) {
-    if (!valid(r) || !out || ((p1|p2)&0xf000)) return EMU_ARGUMENT;
+    const uint16_t pads[]={p1,p2};
+    return emu_step_players(r,pads,2,out);
+}
+int32_t emu_step_players(emu_runtime *r, const uint16_t *pads, uint32_t count, emu_frame *out) {
+    if (!valid(r) || !out || !pads || count!=r->players) return EMU_ARGUMENT;
+    for (unsigned p=0;p<count;++p) if (pads[p]&0xf000) return EMU_ARGUMENT;
     *out = {};
     try {
         // Reapply every button, including releases, so restoring needs no hidden
         // host-side previous-input cache. Plain joypads have no command repeats.
-        for (int b=0; b<12; ++b) {
-            S9xReportButton((1<<16)|b, (p1>>b)&1);
-            S9xReportButton((2<<16)|b, (p2>>b)&1);
-        }
+        for (unsigned p=0;p<5;++p) for (unsigned b=0;b<12;++b)
+            S9xReportButton(((p+1)<<16)|b, p<count ? (pads[p]>>b)&1 : false);
         r->audio.clear(); GFX.Screen = r->video.data();
         IPPU.RenderThisFrame = true;
         S9xMainLoop();
@@ -130,13 +149,13 @@ int32_t emu_state_copy(emu_runtime *r, uint8_t *out, uint32_t capacity) {
         memcpy(out, "EMUSNES1", 8);
         uint32_t raw_size = r->state_size - 16;
         for (int i=0; i<4; ++i) out[8+i] = uint8_t(raw_size >> (8*i));
-        out[12] = OpenBus;
+        out[12] = OpenBus; out[13] = r->players>2 ? r->players : 0;
         return S9xFreezeGameMem(out+16, raw_size) ? EMU_OK : EMU_INTERNAL;
     } catch (...) { r->failed = true; return EMU_INTERNAL; }
 }
 int32_t emu_state_restore(emu_runtime *r, const uint8_t *data, uint32_t size) {
     if (!valid(r) || !data) return EMU_ARGUMENT;
-    if (size != r->state_size || memcmp(data, "EMUSNES1", 8) || data[13] || data[14] || data[15])
+    if (size != r->state_size || memcmp(data, "EMUSNES1", 8) || data[13] != (r->players>2 ? r->players : 0) || data[14] || data[15])
         return EMU_STATE;
     uint32_t raw_size = 0;
     for (int i=0; i<4; ++i) raw_size |= uint32_t(data[8+i]) << (8*i);

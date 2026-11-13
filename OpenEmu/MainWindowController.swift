@@ -69,6 +69,7 @@ final class MainWindowController: NSWindowController {
             viewToReplace?.removeFromSuperview()
             _currentContentController?.viewDidDisappear()
             
+            designWindowTitle.isHidden = newController != libraryController
             // Adjust visual properties of the window.
             var overlapsTitleBar = false
             if newController == gameDocument?.gameViewController {
@@ -78,11 +79,13 @@ final class MainWindowController: NSWindowController {
                 overlapsTitleBar = false
             }
             else if newController == libraryController {
-                window.toolbar = libraryController.toolbar
+                window.toolbar = nil
+                window.titleVisibility = .visible
+                window.title = "OpenEmu-NX"
                 window.titleVisibility = .hidden
                 window.titlebarAppearsTransparent = false
                 window.styleMask.insert(.closable)
-                overlapsTitleBar = true
+                overlapsTitleBar = false
             }
             else if newController is SetupAssistant {
                 window.toolbar = nil
@@ -157,19 +160,31 @@ final class MainWindowController: NSWindowController {
         libraryController.delegate = self
         _ = libraryController.view
         
-        window?.toolbar = libraryController.toolbar
+        window?.toolbar = nil
         if #available(macOS 11.0, *) {
-            window?.toolbarStyle = .unified
+            window?.toolbarStyle = .expanded
             window?.titlebarSeparatorStyle = .line
         }
     }
     
+    private let designWindowTitle = NSTextField(labelWithString: "OpenEmu-NX")
+
     private func setUpWindow() {
         window?.delegate = self
         window?.isExcludedFromWindowsMenu = true
         window?.restorationClass = type(of: self)
-        window?.titlebarAppearsTransparent = true
-        window?.styleMask.insert(.fullSizeContentView)
+        window?.titlebarAppearsTransparent = false
+        window?.styleMask.remove(.fullSizeContentView)
+        window?.titleVisibility = .visible
+        window?.title = "OpenEmu-NX"
+        window?.titleVisibility = .hidden
+        if let frameView = window?.contentView?.superview, let close = window?.standardWindowButton(.closeButton) {
+            designWindowTitle.font = .systemFont(ofSize: 13, weight: .semibold)
+            designWindowTitle.textColor = NXDesign.foreground
+            designWindowTitle.translatesAutoresizingMaskIntoConstraints = false
+            frameView.addSubview(designWindowTitle)
+            NSLayoutConstraint.activate([designWindowTitle.centerXAnchor.constraint(equalTo: frameView.centerXAnchor), designWindowTitle.centerYAnchor.constraint(equalTo: close.centerYAnchor)])
+        }
         // Adaptive window background: dark charcoal in dark mode, standard light in light/system mode.
         if let window = window {
             window.backgroundColor = Self.adaptiveWindowBackground(for: window.effectiveAppearance)
@@ -470,16 +485,16 @@ extension MainWindowController: NSWindowDelegate {
             let alert = NSAlert()
             alert.messageText = "What’s New in OpenEmu-NX \(version)"
             let content = NSTextField(wrappingLabelWithString: """
-            OpenEmu-NX Beta
-            A simpler D-pad icon, clearer player names on Host and Join, and native buttons that pulse without a rectangular background.
+            A new library experience
+            Prominent game artwork, game details, grouped console navigation, search and list view, with a consistent purple theme across Settings and Network Play.
 
-            One lobby, direct play first
-            Rooms, invite codes and relay registration now use a central service. Refresh the public game and relay lists when you want; joined rooms receive live updates. Gameplay uses a direct connection where possible, with TURN relay fallback.
+            Multiplayer saves
+            Browse saved sessions, resume or locate a file in Finder. Delete moves saves to Trash. New autosave filenames include the game, date, time and player count.
 
-            Play together
-            Host-approved ROM transfers happen before gameplay with progress and hash verification. Multiplayer sessions save on the host for later resume.
+            More ways to play together
+            Compressed ROM matching, experimental multi-core netplay, GBA link play and SNES multitap support. Each player keeps their own controls. Direct connections are tried first, with relay fallback.
 
-            SNES netplay remains experimental. Untested games and ROM hacks are marked; other emulator systems are available for local play. ROMs and BIOS files are not included.
+            Netplay compatibility varies by game and core and remains experimental. ROMs and BIOS files are not included.
             """)
             content.font = .systemFont(ofSize: 13)
             content.preferredMaxLayoutWidth = 620

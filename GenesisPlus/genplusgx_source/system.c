@@ -1390,3 +1390,11 @@ void system_frame_sms(int do_skip)
   input_end_frame(mcycles_vdp);
   Z80.cycles -= mcycles_vdp;
 }
+
+/* Copyright (c) 2026 Chris Silvertooth. Frame-boundary rollback filter/input history. */
+int nx_system_snapshot(unsigned char *p, int load) {
+ if(load) { memcpy(eq,p,sizeof(eq));memcpy(&llp,p+sizeof(eq),2);memcpy(&rrp,p+sizeof(eq)+2,2);memcpy(&pause_b,p+sizeof(eq)+4,1); }
+ else { memcpy(p,eq,sizeof(eq));memcpy(p+sizeof(eq),&llp,2);memcpy(p+sizeof(eq)+2,&rrp,2);memcpy(p+sizeof(eq)+4,&pause_b,1); }
+ return sizeof(eq)+5;
+}
+int nx_system_snapshot_size(void) { return sizeof(eq)+5; }

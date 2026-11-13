@@ -34,6 +34,7 @@
 #include <mgba/gba/core.h>
 #include <mgba/internal/gba/cheats.h>
 #include <mgba/internal/gba/input.h>
+#include <mgba/internal/gba/gba.h>
 #include <mgba-util/circle-buffer.h>
 #include <mgba-util/memory.h>
 #include <mgba-util/vfs.h>
@@ -49,6 +50,8 @@
 #include <rc_consoles.h>
 #import "OERetroAchievementsTransport.h"
 #import "OERetroAchievementsBridge.h"
+
+#include "NXGBALink.h"
 
 #define SAMPLES 1024
 
@@ -69,6 +72,9 @@ const char* projectVersion;
 	NSMutableDictionary *cheatSets;
 	OERetroAchievementsBridge *_raBridge;
     NSString *_romPath;
+    struct NXGBALink *_netplayLink;
+    mGBAGameCore *_netplayPeer;
+    __weak mGBAGameCore *_netplayHost;
 }
 - (struct mCore *)mCore;
 @end
@@ -167,6 +173,7 @@ static struct mLogger logger = { .log = _log };
 
 - (void)dealloc
 {
+    if(_netplayLink)NXLinkDestroy(_netplayLink);
     mCoreConfigDeinit(&core->config);
 	core->deinit(core);
 	free(outputBuffer);
@@ -214,12 +221,58 @@ static struct mLogger logger = { .log = _log };
 
 	[_raBridge doFrame];
 
-	int16_t samples[SAMPLES * 2];
-	size_t available = 0;
-	available = blip_samples_avail(core->getAudioChannel(core, 0));
-	blip_read_samples(core->getAudioChannel(core, 0), samples, available, true);
-	blip_read_samples(core->getAudioChannel(core, 1), samples + 1, available, true);
-	[[self audioBufferAtIndex:0] write:samples maxLength:available * 4];
+    [self drainNetplayAudio];
+}
+
+- (void)drainNetplayAudio
+{
+    int16_t samples[SAMPLES * 2];
+    size_t available;
+    while((available=MIN(SAMPLES,blip_samples_avail(core->getAudioChannel(core,0))))) {
+        blip_read_samples(core->getAudioChannel(core,0),samples,available,true);
+        blip_read_samples(core->getAudioChannel(core,1),samples+1,available,true);
+        [[self audioBufferAtIndex:0] write:samples maxLength:available*4];
+    }
+}
+
+// Private two-machine API. The caller owns both machines on one emulation thread.
+- (BOOL)connectNetplayPeer:(mGBAGameCore *)peer
+{
+    if(!peer || peer==self || _netplayLink || _netplayHost || peer->_netplayLink || peer->_netplayHost)return NO;
+    _netplayLink=NXLinkCreate(core,peer->core);if(!_netplayLink)return NO;
+    _netplayPeer=peer;peer->_netplayHost=self;return YES;
+}
+- (void)disconnectNetplayPeer
+{
+    if(!_netplayLink)return;
+    NXLinkDestroy(_netplayLink);_netplayLink=NULL;_netplayPeer->_netplayHost=nil;_netplayPeer=nil;
+}
+- (BOOL)executeLinkedFrame
+{
+    if(!_netplayLink || !NXLinkFrame(_netplayLink))return NO;
+    [self drainNetplayAudio];[_netplayPeer drainNetplayAudio];return YES;
+}
+- (NSData *)serializeLinkedStateWithError:(NSError **)error
+{
+    if(!_netplayLink)return nil;
+    NSData *a=[self serializeNetplayStateWithError:error],*b=[_netplayPeer serializeNetplayStateWithError:error];
+    if(!a || !b)return nil;
+    uint32_t lengths[2]={(uint32_t)a.length,(uint32_t)b.length};
+    struct NXGBALinkState cable=NXLinkSave(_netplayLink);
+    NSMutableData *d=[NSMutableData dataWithBytes:"NXGBPAIR" length:8];
+    [d appendBytes:lengths length:8];[d appendBytes:&cable length:sizeof(cable)];[d appendData:a];[d appendData:b];return d;
+}
+- (BOOL)deserializeLinkedState:(NSData *)data withError:(NSError **)error
+{
+    size_t header=16+sizeof(struct NXGBALinkState);if(!_netplayLink || data.length<header)return NO;
+    const unsigned char *p=data.bytes;uint32_t lengths[2];memcpy(lengths,p+8,8);
+    if(memcmp(p,"NXGBPAIR",8) || lengths[0]>2*1024*1024 || lengths[1]>2*1024*1024 || data.length!=header+lengths[0]+lengths[1])return NO;
+    struct NXGBALinkState cable;memcpy(&cable,p+16,sizeof(cable));
+    if(cable.version!=2)return NO;
+    NXLinkPrepareLoad(_netplayLink);
+    if(![self deserializeNetplayState:[NSData dataWithBytes:p+header length:lengths[0]] withError:error] ||
+       ![_netplayPeer deserializeNetplayState:[NSData dataWithBytes:p+header+lengths[0] length:lengths[1]] withError:error])return NO;
+    return NXLinkLoad(_netplayLink,&cable);
 }
 
 - (void)stopEmulation
@@ -305,6 +358,139 @@ static struct mLogger logger = { .log = _log };
 }
 
 #pragma mark - Save State
+
+
+// Capture channel caches omitted by disk saves, without pointers or struct padding.
+// This private format is local to a matched core binary, at frame boundaries.
+static size_t NXPSGSnapshot(struct GBAudio *a, unsigned char *p, BOOL load)
+{
+    size_t n=0;
+#define NX_FIELD(f) do { if(p) { if(load)memcpy(&a->f,p+n,sizeof(a->f));else memcpy(p+n,&a->f,sizeof(a->f)); } n+=sizeof(a->f); } while(0)
+    NX_FIELD(ch1.sweep.shift);
+    NX_FIELD(ch1.sweep.time);
+    NX_FIELD(ch1.sweep.step);
+    NX_FIELD(ch1.sweep.direction);
+    NX_FIELD(ch1.sweep.enable);
+    NX_FIELD(ch1.sweep.occurred);
+    NX_FIELD(ch1.sweep.realFrequency);
+    NX_FIELD(ch1.envelope.length);
+    NX_FIELD(ch1.envelope.duty);
+    NX_FIELD(ch1.envelope.stepTime);
+    NX_FIELD(ch1.envelope.initialVolume);
+    NX_FIELD(ch1.envelope.currentVolume);
+    NX_FIELD(ch1.envelope.direction);
+    NX_FIELD(ch1.envelope.dead);
+    NX_FIELD(ch1.envelope.nextStep);
+    NX_FIELD(ch1.control.frequency);
+    NX_FIELD(ch1.control.length);
+    NX_FIELD(ch1.control.stop);
+    NX_FIELD(ch1.lastUpdate);
+    NX_FIELD(ch1.index);
+    NX_FIELD(ch1.sample);
+    NX_FIELD(ch2.sweep.shift);
+    NX_FIELD(ch2.sweep.time);
+    NX_FIELD(ch2.sweep.step);
+    NX_FIELD(ch2.sweep.direction);
+    NX_FIELD(ch2.sweep.enable);
+    NX_FIELD(ch2.sweep.occurred);
+    NX_FIELD(ch2.sweep.realFrequency);
+    NX_FIELD(ch2.envelope.length);
+    NX_FIELD(ch2.envelope.duty);
+    NX_FIELD(ch2.envelope.stepTime);
+    NX_FIELD(ch2.envelope.initialVolume);
+    NX_FIELD(ch2.envelope.currentVolume);
+    NX_FIELD(ch2.envelope.direction);
+    NX_FIELD(ch2.envelope.dead);
+    NX_FIELD(ch2.envelope.nextStep);
+    NX_FIELD(ch2.control.frequency);
+    NX_FIELD(ch2.control.length);
+    NX_FIELD(ch2.control.stop);
+    NX_FIELD(ch2.lastUpdate);
+    NX_FIELD(ch2.index);
+    NX_FIELD(ch2.sample);
+    NX_FIELD(ch3.size);
+    NX_FIELD(ch3.bank);
+    NX_FIELD(ch3.enable);
+    NX_FIELD(ch3.sample);
+    NX_FIELD(ch3.length);
+    NX_FIELD(ch3.volume);
+    NX_FIELD(ch3.rate);
+    NX_FIELD(ch3.stop);
+    NX_FIELD(ch3.window);
+    NX_FIELD(ch3.readable);
+    NX_FIELD(ch3.wavedata32);
+    NX_FIELD(ch3.nextUpdate);
+    NX_FIELD(ch4.envelope.length);
+    NX_FIELD(ch4.envelope.duty);
+    NX_FIELD(ch4.envelope.stepTime);
+    NX_FIELD(ch4.envelope.initialVolume);
+    NX_FIELD(ch4.envelope.currentVolume);
+    NX_FIELD(ch4.envelope.direction);
+    NX_FIELD(ch4.envelope.dead);
+    NX_FIELD(ch4.envelope.nextStep);
+    NX_FIELD(ch4.ratio);
+    NX_FIELD(ch4.frequency);
+    NX_FIELD(ch4.power);
+    NX_FIELD(ch4.stop);
+    NX_FIELD(ch4.length);
+    NX_FIELD(ch4.lfsr);
+    NX_FIELD(ch4.nSamples);
+    NX_FIELD(ch4.samples);
+    NX_FIELD(ch4.lastEvent);
+    NX_FIELD(ch4.sample);
+    NX_FIELD(lastLeft);
+    NX_FIELD(lastRight);
+    NX_FIELD(capLeft);
+    NX_FIELD(capRight);
+    NX_FIELD(clock);
+    NX_FIELD(volumeRight);
+    NX_FIELD(volumeLeft);
+    NX_FIELD(ch1Right);
+    NX_FIELD(ch2Right);
+    NX_FIELD(ch3Right);
+    NX_FIELD(ch4Right);
+    NX_FIELD(ch1Left);
+    NX_FIELD(ch2Left);
+    NX_FIELD(ch3Left);
+    NX_FIELD(ch4Left);
+    NX_FIELD(playingCh1);
+    NX_FIELD(playingCh2);
+    NX_FIELD(playingCh3);
+    NX_FIELD(playingCh4);
+    NX_FIELD(frame);
+    NX_FIELD(skipFrame);
+    NX_FIELD(enable);
+#undef NX_FIELD
+    return n;
+}
+
+// Copyright (c) 2026 Chris Silvertooth. Private frame-boundary rollback format.
+- (NSData *)serializeNetplayStateWithError:(NSError **)error
+{
+    NSData *base=[self serializeStateWithError:error];if(!base)return nil;
+    blip_t *left=core->getAudioChannel(core,0),*right=core->getAudioChannel(core,1);
+    uint32_t sizes[3]={(uint32_t)base.length,blip_snapshot_size(left),blip_snapshot_size(right)};
+    NSMutableData *data=[NSMutableData dataWithLength:512+sizes[0]+sizes[1]+sizes[2]];
+    unsigned char *p=data.mutableBytes;memcpy(p,"NXGB0002",8);memcpy(p+8,sizes,12);
+    struct GBAAudio *audio=&((struct GBA *)core->board)->audio;
+    memcpy(p+20,&audio->clock,4);memcpy(p+24,&audio->lastLeft,2);memcpy(p+26,&audio->lastRight,2);
+    if(NXPSGSnapshot(&audio->psg,NULL,NO)>480)return nil;
+    NXPSGSnapshot(&audio->psg,p+32,NO);
+    memcpy(p+512,base.bytes,base.length);
+    if(!blip_snapshot_save(left,p+512+sizes[0],sizes[1]) || !blip_snapshot_save(right,p+512+sizes[0]+sizes[1],sizes[2]))return nil;
+    return data;
+}
+- (BOOL)deserializeNetplayState:(NSData *)data withError:(NSError **)error
+{
+    if(data.length<512)return NO;const unsigned char *p=data.bytes;uint32_t sizes[3];memcpy(sizes,p+8,12);
+    blip_t *left=core->getAudioChannel(core,0),*right=core->getAudioChannel(core,1);
+    if(memcmp(p,"NXGB0002",8) || sizes[0]>2*1024*1024 || sizes[1]!=blip_snapshot_size(left) || sizes[2]!=blip_snapshot_size(right) || data.length!=512+sizes[0]+sizes[1]+sizes[2])return NO;
+    if(![self deserializeState:[NSData dataWithBytes:p+512 length:sizes[0]] withError:error])return NO;
+    struct GBAAudio *audio=&((struct GBA *)core->board)->audio;
+    memcpy(&audio->clock,p+20,4);memcpy(&audio->lastLeft,p+24,2);memcpy(&audio->lastRight,p+26,2);
+    NXPSGSnapshot(&audio->psg,(unsigned char *)p+32,YES);
+    return blip_snapshot_load(left,p+512+sizes[0],sizes[1]) && blip_snapshot_load(right,p+512+sizes[0]+sizes[1],sizes[2]);
+}
 
 - (NSData *)serializeStateWithError:(NSError **)outError
 {

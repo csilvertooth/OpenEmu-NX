@@ -163,7 +163,7 @@
                             </textField>
                         </gridCell>
                         <gridCell row="fjJ-Lb-pEQ" column="WTK-4D-5ET" id="vYn-VI-b4U">
-                            <button key="contentView" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Pdq-ib-TlX">
+                            <button customClass="NXDesignCheckbox" customModule="OpenEmu" customModuleProvider="target" key="contentView" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Pdq-ib-TlX">
                                 <rect key="frame" x="187" y="180" width="364" height="18"/>
                                 <buttonCell key="cell" type="check" title="Copy files to Game Library folder when adding to library" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="20" userLabel="Check Box Cell">
                                     <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -179,7 +179,7 @@
                         </gridCell>
                         <gridCell row="p2b-aW-Bk6" column="oTy-pp-h5N" id="91u-Bo-SiS"/>
                         <gridCell row="p2b-aW-Bk6" column="WTK-4D-5ET" id="W7q-eF-KhO">
-                            <button key="contentView" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="hEf-vx-kWr">
+                            <button customClass="NXDesignCheckbox" customModule="OpenEmu" customModuleProvider="target" key="contentView" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="hEf-vx-kWr">
                                 <rect key="frame" x="187" y="158" width="325" height="18"/>
                                 <buttonCell key="cell" type="check" title="Automatically lookup game information &amp; artwork" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="21" userLabel="Check Box Cell">
                                     <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>

@@ -409,6 +409,13 @@ NSString *const OEImageBrowserGroupSubtitleKey = @"OEImageBrowserGroupSubtitleKe
 
 - (void)mouseUp:(NSEvent *)theEvent
 {
+    id detailItem = nil;
+    if(_draggingIndex != NSNotFound && !_draggingSession && !_trackingCell &&
+       !(theEvent.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption)) &&
+       self.selectionIndexes.count == 1) {
+        IKImageBrowserCell *cell = [self cellForItemAtIndex:_draggingIndex];
+        if([cell isKindOfClass:[OEGridGameCell class]]) detailItem = cell.representedItem;
+    }
     [_trackingCell mouseUp:theEvent];
 
     _ratingTracking = NSNotFound;
@@ -417,6 +424,7 @@ NSString *const OEImageBrowserGroupSubtitleKey = @"OEImageBrowserGroupSubtitleKe
     if(_trackingCell == nil)
         [super mouseUp:theEvent];
     else _trackingCell = nil;
+    if(detailItem) [NSApp sendAction:NSSelectorFromString(@"showSelectedGameDetails:") to:nil from:detailItem];
 }
 
 - (id)groupAtViewLocation:(struct CGPoint)arg1 clickableArea:(BOOL)arg2

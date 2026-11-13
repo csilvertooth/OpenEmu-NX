@@ -39,19 +39,23 @@ final class LibraryController: NSTabViewController, NSMenuItemValidation {
         case grid, list
     }
     
+    private var activeCategory: Category = .games
+    private var categoryControllers: [Category: NSViewController] = [:]
+    private var gamesShell: LibraryGamesViewController? {
+        tabViewItems.first?.viewController as? LibraryGamesViewController
+    }
+
     var selectedCatagory: Category {
-        get {
-            Category(rawValue: selectedTabViewItemIndex) ?? .games
-        }
-        
+        get { activeCategory }
         set {
-            selectedTabViewItemIndex = newValue.rawValue
+            activeCategory = newValue
             toolbar.categorySelector.selectedSegment = newValue.rawValue
-            
             UserDefaults.standard.set(newValue.rawValue, forKey: DefaultKeys.lastCategory.rawValue)
+            gamesShell?.showCategory(newValue, contentController: categoryControllers[newValue])
+            gamesShell?.selectSidebarCategory(newValue)
         }
     }
-    
+
     override var nibName: NSNib.Name? { "LibraryController" }
     
     @objc weak var delegate: LibraryControllerDelegate?
@@ -59,7 +63,7 @@ final class LibraryController: NSTabViewController, NSMenuItemValidation {
         let toolbar = LibraryToolbar(identifier: "OELibraryToolbar")
         toolbar.delegate = toolbarDelegate
         toolbar.displayMode = .iconOnly
-        toolbar.centeredItemIdentifier = .oeCategory
+        toolbar.centeredItemIdentifier = nil
         toolbar.allowsUserCustomization = true
         toolbar.autosavesConfiguration = true
         if #available(macOS 10.15, *) {} else {
@@ -89,146 +93,82 @@ final class LibraryController: NSTabViewController, NSMenuItemValidation {
         view.layer?.backgroundColor = NSColor.clear.cgColor
         tabStyle = .unspecified
         transitionOptions = []
+        let restoredCategory = Category(rawValue: UserDefaults.standard.integer(forKey: DefaultKeys.lastCategory.rawValue)) ?? .games
         setUpTabViews()
         // HACK: force NIB to load, so GameScannerViewController is initialized
         _ = tabViewItems[0].view
         
-        if let category = Category(rawValue: UserDefaults.standard.integer(forKey: DefaultKeys.lastCategory.rawValue)) {
-            selectedCatagory = category
-        }
+        selectedCatagory = restoredCategory
         
         newSaveStatesViewObserver = Self.$useNewSaveStatesViewController.observe { [weak self] _, newValue in
-            guard
-                let self = self,
-                let useNew = newValue
-            else { return }
-            
-            let idx = self.tabView.indexOfTabViewItem(withIdentifier: NSUserInterfaceItemIdentifier.savestatesViewController)
-            let item = self.tabView.tabViewItem(at: idx)
-            self.removeTabViewItem(item)
-            if useNew {
-                let ctrl = SaveStateViewController()
-                ctrl.database = self.database
-                ctrl.representedObject = OEDBSaveStatesMedia.shared
-                let item = NSTabViewItem(identifier: NSUserInterfaceItemIdentifier.savestatesViewController)
-                item.viewController = ctrl
-                self.insertTabViewItem(item, at: idx)
-            } else {
-                let ctrl = OEMediaViewController()
-                ctrl.database = self.database
-                ctrl.saveStateMode = true
-                ctrl.representedObject = OEDBSaveStatesMedia.shared
-                let item = NSTabViewItem(identifier: NSUserInterfaceItemIdentifier.savestatesViewController)
-                item.viewController = ctrl
-                self.insertTabViewItem(item, at: idx)
-            }
-            self.selectedTabViewItemIndex = idx
+            guard let self, newValue != nil else { return }
+            self.categoryControllers[.saveStates] = self.makeSaveStatesController()
+            if self.activeCategory == .saveStates { self.selectedCatagory = .saveStates }
         }
-        
         newScreenshotsViewObserver = Self.$useNewScreenshotsViewController.observe { [weak self] _, newValue in
-            guard
-                let self = self,
-                let useNew = newValue
-            else { return }
-            
-            let idx = self.tabView.indexOfTabViewItem(withIdentifier: NSUserInterfaceItemIdentifier.screenshotsViewController)
-            let item = self.tabView.tabViewItem(at: idx)
-            self.removeTabViewItem(item)
-            if useNew {
-                let ctrl = ScreenshotViewController()
-                ctrl.database = self.database
-                ctrl.representedObject = OEDBScreenshotsMedia.shared
-                let item = NSTabViewItem(identifier: NSUserInterfaceItemIdentifier.screenshotsViewController)
-                item.viewController = ctrl
-                self.insertTabViewItem(item, at: idx)
-            } else {
-                let ctrl = OEMediaViewController()
-                ctrl.database = self.database
-                ctrl.representedObject = OEDBScreenshotsMedia.shared
-                let item = NSTabViewItem(identifier: NSUserInterfaceItemIdentifier.screenshotsViewController)
-                item.viewController = ctrl
-                self.insertTabViewItem(item, at: idx)
-            }
-            self.selectedTabViewItemIndex = idx
+            guard let self, newValue != nil else { return }
+            self.categoryControllers[.screenshots] = self.makeScreenshotsController()
+            if self.activeCategory == .screenshots { self.selectedCatagory = .screenshots }
         }
     }
-    
+
     var newSaveStatesViewObserver: Any?
     var newScreenshotsViewObserver: Any?
-    
-    override func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
-        super.tabView(tabView, didSelect: tabViewItem)
-        
-        toolbar.categorySelector.selectedSegment = selectedTabViewItemIndex
-        view.window?.makeFirstResponder(tabViewItem?.view)
-    }
-    
+
     private func setUpTabViews() {
-        do {
-            let ctrl = LibraryGamesViewController()
-            ctrl.database = database
-            let item = NSTabViewItem(identifier: "org.openemu.category.library")
-            item.viewController = ctrl
-            addTabViewItem(item)
-        }
-        
-        if Self.useNewSaveStatesViewController {
-            do {
-                let ctrl = SaveStateViewController()
-                ctrl.database = database
-                ctrl.representedObject = OEDBSaveStatesMedia.shared
-                let item = NSTabViewItem(identifier: NSUserInterfaceItemIdentifier.screenshotsViewController)
-                item.viewController = ctrl
-                addTabViewItem(item)
-            }
-        } else {
-            do {
-                let ctrl = OEMediaViewController()
-                ctrl.database = database
-                ctrl.saveStateMode = true
-                ctrl.representedObject = OEDBSaveStatesMedia.shared
-                let item = NSTabViewItem(identifier: NSUserInterfaceItemIdentifier.savestatesViewController)
-                item.viewController = ctrl
-                addTabViewItem(item)
-            }
-        }
-        
-        if Self.useNewScreenshotsViewController {
-            do {
-                let ctrl = ScreenshotViewController()
-                ctrl.database = database
-                ctrl.representedObject = OEDBScreenshotsMedia.shared
-                let item = NSTabViewItem(identifier: NSUserInterfaceItemIdentifier.screenshotsViewController)
-                item.viewController = ctrl
-                addTabViewItem(item)
-            }
-        } else {
-            do {
-                let ctrl = OEMediaViewController()
-                ctrl.database = database
-                ctrl.representedObject = OEDBScreenshotsMedia.shared
-                let item = NSTabViewItem(identifier: NSUserInterfaceItemIdentifier.screenshotsViewController)
-                item.viewController = ctrl
-                addTabViewItem(item)
-            }
-        }
-        do {
-            let ctrl = HomebrewViewController()
-            ctrl.database = database
-            let item = NSTabViewItem(identifier: "org.openemu.category.homebrew")
-            item.viewController = ctrl
-            addTabViewItem(item)
-        }
+        // One shell owns the sidebar for every destination. The other controllers
+        // are retained here and embedded in its content pane when selected.
+        categoryControllers[.saveStates] = makeSaveStatesController()
+        categoryControllers[.screenshots] = makeScreenshotsController()
+        let homebrew = HomebrewViewController()
+        homebrew.database = database
+        categoryControllers[.homebrew] = homebrew
+        let games = LibraryGamesViewController()
+        games.database = database
+        let item = NSTabViewItem(identifier: "org.openemu.category.library")
+        item.viewController = games
+        addTabViewItem(item)
     }
-    
+
+    private func makeSaveStatesController() -> NSViewController {
+        if Self.useNewSaveStatesViewController {
+            let controller = SaveStateViewController()
+            controller.database = database
+            controller.representedObject = OEDBSaveStatesMedia.shared
+            return controller
+        }
+        let controller = OEMediaViewController()
+        controller.database = database
+        controller.saveStateMode = true
+        controller.representedObject = OEDBSaveStatesMedia.shared
+        return controller
+    }
+
+    private func makeScreenshotsController() -> NSViewController {
+        if Self.useNewScreenshotsViewController {
+            let controller = ScreenshotViewController()
+            controller.database = database
+            controller.representedObject = OEDBScreenshotsMedia.shared
+            return controller
+        }
+        let controller = OEMediaViewController()
+        controller.database = database
+        controller.representedObject = OEDBScreenshotsMedia.shared
+        return controller
+    }
+
     override func viewDidAppear() {
         super.viewDidAppear()
         
         toolbar.categorySelector.selectedSegment = selectedCatagory.rawValue
+        // Remove a category strip restored from an older saved toolbar layout.
+        for index in toolbar.items.indices.reversed() where toolbar.items[index].itemIdentifier == .oeCategory {
+            toolbar.removeItem(at: index)
+        }
     }
     
     override func viewWillDisappear() {
-        super.viewWillAppear()
+        super.viewWillDisappear()
         
         if let container = toolbar.searchField.superview {
             container.autoresizingMask = .width
@@ -238,7 +178,7 @@ final class LibraryController: NSTabViewController, NSMenuItemValidation {
     // MARK: - Toolbar Actions
     
     private func tryForwardAction(sel: Selector, with sender: Any?) {
-        if let ctl = tabView.selectedTabViewItem?.viewController, ctl.responds(to: sel) {
+        if let ctl = currentSubviewController, ctl.responds(to: sel) {
             ctl.perform(sel, with: sender)
         }
     }
@@ -281,7 +221,7 @@ final class LibraryController: NSTabViewController, NSMenuItemValidation {
     override func magnify(with event: NSEvent) {
         guard toolbar.gridSizeSlider.isEnabled else { return }
         
-        if let ctl = tabView.selectedTabViewItem?.viewController, !ctl.responds(to: #selector(changeGridSize(_:))) {
+        if let ctl = currentSubviewController, !ctl.responds(to: #selector(changeGridSize(_:))) {
             return
         }
         
@@ -319,7 +259,7 @@ final class LibraryController: NSTabViewController, NSMenuItemValidation {
     // MARK: - Categories
     
     @objc var currentSubviewController: NSViewController? {
-        return tabView.selectedTabViewItem?.viewController
+        activeCategory == .games ? gamesShell : categoryControllers[activeCategory]
     }
     
     private func switchCategoryFromToolbar() {
@@ -346,7 +286,7 @@ final class LibraryController: NSTabViewController, NSMenuItemValidation {
     // MARK: - Validation
     
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        guard let currentSubviewController = tabView.selectedTabViewItem?.viewController else { return false }
+        guard let currentSubviewController = currentSubviewController else { return false }
         switch menuItem.action {
         case #selector(startSelectedGame(_:)):
             if let ctl = currentSubviewController as? LibrarySubviewControllerGameSelection {
@@ -399,7 +339,7 @@ final class LibraryController: NSTabViewController, NSMenuItemValidation {
             gamesToStart.append(game)
         } else {
             guard
-                let ctl = tabView.selectedTabViewItem?.viewController as? LibrarySubviewControllerGameSelection
+                let ctl = currentSubviewController as? LibrarySubviewControllerGameSelection
             else { return }
             
             gamesToStart.append(contentsOf: ctl.selectedGames)
@@ -421,7 +361,7 @@ final class LibraryController: NSTabViewController, NSMenuItemValidation {
     
     @IBAction func startSaveState(_ sender: Any?) {
         guard
-            let ctl = tabView.selectedTabViewItem?.viewController as? LibrarySubviewControllerSaveStateSelection,
+            let ctl = currentSubviewController as? LibrarySubviewControllerSaveStateSelection,
             let game = ctl.selectedSaveStates.first
         else { return }
         
@@ -436,7 +376,7 @@ final class LibraryController: NSTabViewController, NSMenuItemValidation {
     @IBAction func startSelectedGame(withCore sender: NSMenuItem) {
         guard let core = sender.representedObject as? OECorePlugin else { return }
         guard
-            let ctl = tabView.selectedTabViewItem?.viewController as? LibrarySubviewControllerGameSelection,
+            let ctl = currentSubviewController as? LibrarySubviewControllerGameSelection,
             let game = ctl.selectedGames.first
         else { return }
         delegate?.libraryController?(self, didSelectGame: game, withCore: core)
@@ -446,7 +386,7 @@ final class LibraryController: NSTabViewController, NSMenuItemValidation {
     @IBAction func startSelectedGameLockedOnToSonicKnuckles(_ sender: NSMenuItem) {
         guard let lockOnGame = sender.representedObject as? OEDBGame else { return }
         guard
-            let ctl = tabView.selectedTabViewItem?.viewController as? LibrarySubviewControllerGameSelection,
+            let ctl = currentSubviewController as? LibrarySubviewControllerGameSelection,
             let game = ctl.selectedGames.first
         else { return }
         delegate?.libraryController?(self, didSelectGame: game, lockedOnTo: lockOnGame)

@@ -25,14 +25,16 @@ cp "$repo/SNES9x/src/LICENSE" "$license_dest/Snes9x-LICENSE"
 gns_root="${EMU_GNS_ROOT:-$repo/Dependencies/GameNetworkingSockets}"
 deps_root="${EMU_DEPS_ROOT:-$repo/Dependencies/macos14.0}"
 gns_archive="${EMU_GNS_ARCHIVE:-$gns_root/build/src/libGameNetworkingSockets_s.a}"
-"$cmake_bin" -S "$repo/Runtime/Netplay" -B "$TARGET_TEMP_DIR/NetworkSession" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DGNS_ROOT="$gns_root" -DGNS_ARCHIVE="$gns_archive" -DDEPS_ROOT="$deps_root" -DRUNTIME_LIBRARY="$build/libemu_snes.dylib"
+"$cmake_bin" -S "$repo/Runtime/Netplay" -B "$TARGET_TEMP_DIR/NetworkSession" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DGNS_ROOT="$gns_root" -DGNS_ARCHIVE="$gns_archive" -DDEPS_ROOT="$deps_root" -DRUNTIME_LIBRARY="$build/libemu_snes.dylib" -DOE_FRAMEWORK_DIR="$TARGET_BUILD_DIR"
 "$cmake_bin" --build "$TARGET_TEMP_DIR/NetworkSession" --target emu-live -j 8
+copy_binary "$TARGET_TEMP_DIR/NetworkSession/libemu_openemu.dylib" "$dest/libemu_openemu.dylib"
 copy_binary "$TARGET_TEMP_DIR/NetworkSession/emu-live" "$dest/emu-live"
 cp "$gns_root/LICENSE" "$license_dest/GameNetworkingSockets-LICENSE"
 game_app="$dest/NetworkPlay.app"
 mkdir -p "$game_app/Contents/MacOS"
 copy_binary "$dest/emu-live" "$game_app/Contents/MacOS/emu-live"
 copy_binary "$dest/libemu_snes.dylib" "$game_app/Contents/MacOS/libemu_snes.dylib"
+copy_binary "$dest/libemu_openemu.dylib" "$game_app/Contents/MacOS/libemu_openemu.dylib"
 cat > "$game_app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -49,8 +51,10 @@ cat > "$game_app/Contents/Info.plist" <<'PLIST'
 PLIST
 if [[ "${CODE_SIGNING_ALLOWED:-NO}" != NO && -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]]; then
     codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$dest/libemu_snes.dylib"
+    codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$dest/libemu_openemu.dylib"
     codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$dest/emu-identity"
     codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$dest/emu-live"
     copy_binary "$dest/libemu_snes.dylib" "$game_app/Contents/MacOS/libemu_snes.dylib"
+    copy_binary "$dest/libemu_openemu.dylib" "$game_app/Contents/MacOS/libemu_openemu.dylib"
     codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$game_app"
 fi

@@ -19,7 +19,7 @@
         <stackView orientation="horizontal" alignment="centerY" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="8oT-eI-DAz">
             <rect key="frame" x="0.0" y="0.0" width="169" height="17"/>
             <beginningViews>
-                <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="GhX-ac-Q7T">
+                <button customClass="NXDesignCheckbox" customModule="OpenEmu" customModuleProvider="target" verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="GhX-ac-Q7T">
                     <rect key="frame" x="-2" y="0.0" width="121" height="18"/>
                     <buttonCell key="cell" type="check" title="Commodore 64" bezelStyle="regularSquare" imagePosition="left" state="on" inset="2" id="ReX-YM-dfa">
                         <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>

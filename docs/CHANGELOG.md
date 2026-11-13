@@ -1,3 +1,19 @@
+# 0.1.8 Beta 3
+
+An updated library and multiplayer experience for OpenEmu-NX.
+
+- Artwork-focused game pages, grouped console sidebar, search and list view, plus a consistent purple theme across Settings and Network Play.
+- Browse multiplayer saves, resume a session or locate a file in Finder. Deleting a save moves it to Trash. New autosave filenames include game name, date, time and player count.
+- Experimental multi-core netplay, GBA link play and SNES multitap support for compatible games.
+- Compressed ROM support uses the extracted game hash so compressed and uncompressed copies can match.
+- Controller and keyboard mappings remain local to each player, with clearer connection feedback.
+- Updated first-launch What's New and About presentation.
+
+Netplay remains experimental; compatibility depends on the game and core. ROMs and BIOS files are not included. Apple silicon, macOS 14 or later.
+
+Validation: the preceding preview was tested interactively, and networking was confirmed by the user. Save naming and recoverable Trash operations passed focused checks; the final Delete button interaction was not independently completed through UI automation. No new cross-Mac gameplay run was performed for this packaging update.
+
+
 ## 0.1.7-beta.5
 
 - Corrected all app icon asset variants, including dark appearance, to use the approved D-pad and two-button artwork.

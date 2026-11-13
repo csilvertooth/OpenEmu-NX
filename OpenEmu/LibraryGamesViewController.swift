@@ -72,15 +72,92 @@ final class LibraryGamesViewController: NSSplitViewController {
     private static let skipDiscGuideMessageKey = "OESkipDiscGuideMessageKey"
     private lazy var discGuideMessageSystemIDs: [String?] = []
     
-    private let sidebarMinWidth: CGFloat = 105
-    private let sidebarDefaultWidth: CGFloat = 200
+    private let sidebarMinWidth: CGFloat = 250
+    private let sidebarDefaultWidth: CGFloat = 250
     private let sidebarMaxWidth: CGFloat = 450
-    private let collectionViewMinWidth: CGFloat = 495
+    private let collectionViewMinWidth: CGFloat = 680
     
     private var sidebarController: SidebarController!
     private var collectionController: GamesCollectionControlling!
+    private let contentPane = NSViewController()
+    private var displayedController: NSViewController?
+    private var detailGame: OEDBGame? { didSet { designBack.isHidden = detailGame == nil } }
+    private let designBack = NXDesignButton(title: "Back", target: nil, action: nil)
+    private let designSearch = NSSearchField()
+    private let breadcrumb = NSTextField(labelWithString: "Library")
+    private let contentBody = NSView()
+    private func buildDesignHeader() {
+        let header = NXDesignBackground(color: NXDesign.background)
+        let back = designBack
+        back.isHidden = detailGame == nil
+        back.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: nil)
+        back.widthAnchor.constraint(equalToConstant: 84).isActive = true
+        back.heightAnchor.constraint(equalToConstant: 36).isActive = true
+        back.handler = { [weak self] in self?.showLibrary() }; back.target = back; back.action = #selector(NXDesignButton.invoke)
+        back.setAccessibilityLabel("Back to Library")
+        breadcrumb.textColor = NXDesign.secondary; breadcrumb.font = .systemFont(ofSize: 14)
+        let grid = NSButton(image: NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: "Grid view")!, target: self, action: #selector(switchToGridView(_:)))
+        let list = NSButton(image: NSImage(systemSymbolName: "list.bullet", accessibilityDescription: "List view")!, target: self, action: #selector(switchToListView(_:)))
+        for button in [grid, list] { button.isBordered = false; button.contentTintColor = NXDesign.foreground; button.widthAnchor.constraint(equalToConstant: 28).isActive = true }
+        let search = designSearch; search.placeholderString = "Search library"; search.font = .systemFont(ofSize: 14)
+        search.sendsSearchStringImmediately = true; search.target = self; search.action = #selector(self.search(_:))
+        search.widthAnchor.constraint(equalToConstant: 190).isActive = true
+        let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let controls = NSStackView(views: [back, breadcrumb, spacer, grid, list, search]); controls.spacing = 16; controls.alignment = .centerY
+        controls.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(controls)
+        for child in [header, contentBody] { child.translatesAutoresizingMaskIntoConstraints = false; contentPane.view.addSubview(child) }
+        NSLayoutConstraint.activate([header.leadingAnchor.constraint(equalTo: contentPane.view.leadingAnchor), header.trailingAnchor.constraint(equalTo: contentPane.view.trailingAnchor), header.topAnchor.constraint(equalTo: contentPane.view.topAnchor), header.heightAnchor.constraint(equalToConstant: 70), controls.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 34), controls.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -24), controls.centerYAnchor.constraint(equalTo: header.centerYAnchor), contentBody.leadingAnchor.constraint(equalTo: header.leadingAnchor), contentBody.trailingAnchor.constraint(equalTo: header.trailingAnchor), contentBody.topAnchor.constraint(equalTo: header.bottomAnchor), contentBody.bottomAnchor.constraint(equalTo: contentPane.view.bottomAnchor)])
+    }
+
+    private func display(_ controller: NSViewController) {
+        guard displayedController !== controller else { return }
+        displayedController?.view.removeFromSuperview()
+        displayedController?.removeFromParent()
+        controller.removeFromParent()
+        contentPane.addChild(controller)
+        let content = controller.view
+        content.translatesAutoresizingMaskIntoConstraints = false
+        contentBody.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: contentBody.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: contentBody.trailingAnchor),
+            content.topAnchor.constraint(equalTo: contentBody.topAnchor),
+            content.bottomAnchor.constraint(equalTo: contentBody.bottomAnchor)
+        ])
+        displayedController = controller
+    }
+
+    func showCategory(_ category: LibraryController.Category, contentController: NSViewController?) {
+        _ = view
+        detailGame = nil
+        display(contentController ?? collectionController)
+    }
+
+    func selectSidebarCategory(_ category: LibraryController.Category) {
+        _ = view
+        sidebarController.selectCategory(category)
+    }
+
+    private func showLibrary() {
+        detailGame = nil
+        display(collectionController)
+        collectionController.performSearch(designSearch.stringValue)
+    }
+
+    @objc func showSelectedGameDetails(_ sender: Any?) {
+        guard let game = (sender as? OEDBGame) ?? collectionController.selectedGames.first else { return }
+        detailGame = game
+        breadcrumb.stringValue = "Library / " + (game.system?.name ?? "All Games")
+        let detail = NXGameDetailViewController(game: game)
+        detail.onBack = { [weak self] in self?.showLibrary() }
+        detail.onPlay = { [weak self] in (self?.parent as? LibraryController)?.start(game: game) }
+        detail.onHost = { NetworkPlayController.hostLibraryGame(game) }
+        detail.onMultiplayerSaves = { NetworkPlayController.resumeLibraryGame(game) }
+        detail.onResumeSave = { [weak self] save in (self?.parent as? LibraryController)?.start(saveState: save) }
+        display(detail)
+    }
     private var toolbar: LibraryToolbar? {
-        view.window?.toolbar as? LibraryToolbar
+        (parent as? LibraryController)?.toolbar
     }
     
     var database: OELibraryDatabase?
@@ -111,7 +188,7 @@ final class LibraryGamesViewController: NSSplitViewController {
     override func viewDidAppear() {
         super.viewDidAppear()
         
-        collectionController.updateBlankSlate()
+        if displayedController === collectionController { collectionController.updateBlankSlate() }
         
         if #available(macOS 11.0, *) {
             view.window?.titlebarSeparatorStyle = .automatic
@@ -139,10 +216,11 @@ final class LibraryGamesViewController: NSSplitViewController {
         splitView.wantsLayer = true
         splitView.layer?.backgroundColor = NSColor.clear.cgColor
         
-        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarController)
+        let sidebarItem = NSSplitViewItem(viewController: sidebarController)
         sidebarItem.minimumThickness = sidebarMinWidth
         sidebarItem.maximumThickness = sidebarMaxWidth
         sidebarItem.canCollapse = false
+        sidebarItem.holdingPriority = NSLayoutConstraint.Priority(rawValue: 999)
         if #available(macOS 11.0, *) {
             sidebarItem.titlebarSeparatorStyle = .automatic
         }
@@ -178,12 +256,17 @@ final class LibraryGamesViewController: NSSplitViewController {
             ])
         }
 
-        let collectionItem = NSSplitViewItem(viewController: collectionController)
+        contentPane.view = NXDesignBackground(color: NXDesign.background)
+        buildDesignHeader()
+        let collectionItem = NSSplitViewItem(viewController: contentPane)
         collectionItem.minimumThickness = collectionViewMinWidth
+        collectionItem.holdingPriority = .defaultLow
         if #available(macOS 11.0, *) {
             collectionItem.titlebarSeparatorStyle = .line
         }
         addSplitViewItem(collectionItem)
+        display(collectionController)
+        collectionController.performSearch(designSearch.stringValue)
     }
     
     private func setUpSplitViewAutosave() {
@@ -192,7 +275,7 @@ final class LibraryGamesViewController: NSSplitViewController {
             return
         }
         
-        let autosaveName = "OELibraryGamesSplitView"
+        let autosaveName = "NXApprovedLibrarySplitView"
         
         if UserDefaults.standard.object(forKey: "NSSplitView Subview Frames \(autosaveName)") == nil {
             splitView.setPosition(sidebarDefaultWidth, ofDividerAt: 0)
@@ -218,15 +301,20 @@ final class LibraryGamesViewController: NSSplitViewController {
     }
     
     @IBAction func switchToGridView(_ sender: Any?) {
+        showLibrary()
         collectionController.showGridView()
+        collectionController.performSearch(designSearch.stringValue)
     }
     
     @IBAction func switchToListView(_ sender: Any?) {
+        showLibrary()
         collectionController.showListView()
+        collectionController.performSearch(designSearch.stringValue)
     }
     
     @IBAction func search(_ sender: NSSearchField?) {
         guard let searchField = sender else { return }
+        showLibrary()
         collectionController.performSearch(searchField.stringValue)
     }
     
@@ -255,9 +343,28 @@ final class LibraryGamesViewController: NSSplitViewController {
            let fallback = sidebarController.collections.first(where: { $0 is GameCollectionViewItemProtocol }) {
             sidebarController.selectItem(fallback)
         }
+        if sidebarController.selectedSidebarItem is NXMultiplayerSidebarItem {
+            detailGame = nil
+            breadcrumb.stringValue = "Library / Multiplayer Saves"
+            let browser = NXMultiplayerSavesViewController()
+            browser.onResume = { NetworkPlayController.resumeSavedSession($0) }
+            display(browser)
+            return
+        }
+        if let destination = sidebarController.selectedSidebarItem as? SidebarDestinationItem {
+            if let library = parent as? LibraryController, library.selectedCatagory != destination.category {
+                library.selectedCatagory = destination.category
+            }
+            return
+        }
         guard let selectedItem = sidebarController.selectedSidebarItem,
               let collection = selectedItem as? GameCollectionViewItemProtocol else { return }
+        if let library = parent as? LibraryController, library.selectedCatagory != .games {
+            library.selectedCatagory = .games
+        }
+        showLibrary()
         collectionController.representedObject = collection
+        breadcrumb.stringValue = "Library / " + selectedItem.sidebarName
         
         // For empty collections of disc-based games, display an alert to compel the user to read the disc-importing guide.
         // Delay disc alert by 200 ms to allow navigating past disc-based systems with arrow keys in the sidebar without triggering the alert.
@@ -299,7 +406,7 @@ final class LibraryGamesViewController: NSSplitViewController {
 extension LibraryGamesViewController: LibrarySubviewControllerGameSelection {
     
     var selectedGames: [OEDBGame] {
-        collectionController.selectedGames
+        detailGame.map { [$0] } ?? collectionController.selectedGames
     }
 }
 

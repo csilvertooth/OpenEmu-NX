@@ -2236,14 +2236,24 @@ int YM2612LoadContext(unsigned char *state)
   return bufferptr;
 }
 
+int nx_ym2612_canonical_snapshot = 0;
 int YM2612SaveContext(unsigned char *state)
 {
   int c,s;
   uint8 index;
   int bufferptr = 0;
 
-  /* save YM2612 context */
-  save_param(&ym2612, sizeof(ym2612));
+  /* Rollback snapshots omit addresses rebuilt by YM2612LoadContext. */
+  YM2612 copy = ym2612;
+  if (nx_ym2612_canonical_snapshot) {
+    for (c=0; c<6; c++) {
+      for (s=0; s<4; s++) copy.CH[c].SLOT[s].DT = NULL;
+      copy.CH[c].connect1 = copy.CH[c].connect2 = NULL;
+      copy.CH[c].connect3 = copy.CH[c].connect4 = NULL;
+      copy.CH[c].mem_connect = NULL;
+    }
+  }
+  save_param(&copy, sizeof(copy));
 
   /* save DT table index for each channel slots */
   for (c=0; c<6; c++)

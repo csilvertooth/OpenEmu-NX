@@ -35,6 +35,10 @@
 #import <OpenGL/gl.h>
 
 #include "shared.h"
+extern int nx_ym2612_canonical_snapshot;
+extern int nx_fm_snapshot(unsigned char *, int);
+extern int nx_system_snapshot(unsigned char *, int);
+extern int nx_system_snapshot_size(void);
 
 #define RC_CLIENT_SUPPORTS_HASH 1
 #include <rc_client.h>
@@ -766,6 +770,36 @@ static __weak GenPlusGameCore *_current;
         rc_client_reset(_rcClient);
 
     block(YES, nil);
+}
+
+
+// Copyright (c) 2026 Chris Silvertooth. Private frame-boundary rollback format.
+- (NSData *)serializeNetplayStateWithError:(NSError **)error
+{
+    if (snd.blips[1] || snd.blips[2]) return nil; // CD audio needs its own complete snapshot.
+    uint32_t mainSize=STATE_SIZE, blipSize=blip_snapshot_size(snd.blips[0]);
+    uint32_t extraSize=12+nx_system_snapshot_size();
+    NSMutableData *data=[NSMutableData dataWithLength:16+mainSize+extraSize+blipSize];
+    unsigned char *p=data.mutableBytes;memcpy(p,"NXGP0001",8);memcpy(p+8,&mainSize,4);memcpy(p+12,&blipSize,4);
+    // state_save serializes Z80_Regs including process addresses. Those are local
+    // callbacks, not emulated state. Preserve them on the running instance.
+    Z80_Regs saved=Z80;Z80.daisy=NULL;Z80.irq_callback=NULL;
+    nx_ym2612_canonical_snapshot=1;
+    int ok=state_save(p+16);nx_ym2612_canonical_snapshot=0;Z80=saved;if(!ok)return nil;
+    nx_fm_snapshot(p+16+mainSize,0);nx_system_snapshot(p+16+mainSize+12,0);
+    if(!blip_snapshot_save(snd.blips[0],p+16+mainSize+extraSize,blipSize))return nil;
+    return data;
+}
+- (BOOL)deserializeNetplayState:(NSData *)data withError:(NSError **)error
+{
+    if(data.length<16 || snd.blips[1] || snd.blips[2])return NO;
+    const unsigned char *p=data.bytes;uint32_t mainSize,blipSize;memcpy(&mainSize,p+8,4);memcpy(&blipSize,p+12,4);
+    uint32_t extraSize=12+nx_system_snapshot_size();
+    if(memcmp(p,"NXGP0001",8) || mainSize!=STATE_SIZE || blipSize!=blip_snapshot_size(snd.blips[0]) || data.length!=16+mainSize+extraSize+blipSize)return NO;
+    const struct z80_irq_daisy_chain *daisy=Z80.daisy;
+    if(!state_load((unsigned char *)p+16))return NO;Z80.daisy=daisy;
+    nx_fm_snapshot((unsigned char *)p+16+mainSize,1);nx_system_snapshot((unsigned char *)p+16+mainSize+12,1);
+    return blip_snapshot_load(snd.blips[0],p+16+mainSize+extraSize,blipSize);
 }
 
 - (NSData *)serializeStateWithError:(NSError **)outError

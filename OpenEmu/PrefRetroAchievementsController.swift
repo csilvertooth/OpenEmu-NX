@@ -55,9 +55,9 @@ final class PrefRetroAchievementsController: NSViewController {
     private let statusLabel     = NSTextField(labelWithString: "")
     private let registerLabel   = NSTextField(labelWithString: "")
     private let hardcoreDivider = NSBox()
-    private let hardcoreCheckbox = NSButton(checkboxWithTitle: "Hardcore mode (recommended)", target: nil, action: nil)
+    private let hardcoreCheckbox = NXDesignCheckbox(checkboxWithTitle: "Hardcore mode (recommended)", target: nil, action: nil)
     private let hardcoreSubtitle = NSTextField(wrappingLabelWithString: "")
-    private let trackersCheckbox = NSButton(checkboxWithTitle: "Show on-screen trackers in softcore mode", target: nil, action: nil)
+    private let trackersCheckbox = NXDesignCheckbox(checkboxWithTitle: "Show on-screen trackers in softcore mode", target: nil, action: nil)
     private let trackersSubtitle = NSTextField(wrappingLabelWithString: "")
 
     private let supportedDivider = NSBox()

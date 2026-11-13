@@ -67,6 +67,7 @@ final class PreferencesWindowController: NSWindowController {
             window?.titlebarSeparatorStyle = .line
         }
         
+        NXDesign.apply(to: window!)
         window!.center()
     }
     
@@ -205,6 +206,7 @@ final class PreferencesTabViewController: NSTabViewController {
         super.viewDidAppear()
         
         updateWindowTitle()
+        if let window = view.window { NXDesign.apply(to: window) }
         updateWindowFrame(animated: false)
     }
     
@@ -228,6 +230,7 @@ final class PreferencesTabViewController: NSTabViewController {
             return
         }
         
+        if let pane = tabViewItem?.viewController { NXDesign.apply(to: pane.view) }
         // Record the selected pane index in user defaults.
         UserDefaults.standard.set(selectedTabViewItemIndex, forKey: PreferencesWindowController.selectedPreferencesTabKey)
     }
@@ -237,8 +240,12 @@ final class PreferencesTabViewController: NSTabViewController {
     func addTabViewItem(with pane: PreferencePane) {
         
         let item = NSTabViewItem(viewController: pane)
+        pane.view.wantsLayer = true
+        pane.view.layer?.backgroundColor = NXDesign.background.cgColor
+        NXDesign.apply(to: pane.view)
         
-        item.image = pane.icon
+        let symbols = ["Library": "books.vertical", "Gameplay": "play.rectangle", "Controls": "gamecontroller", "Cores": "cpu", "System Files": "externaldrive", "Cloud Sync": "icloud", "Cover Art": "photo", "Achievements": "trophy"]
+        item.image = symbols[pane.panelTitle].flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: pane.panelTitle) } ?? pane.icon
         item.identifier = pane.panelTitle
         item.label = NSLocalizedString(pane.panelTitle, comment: "")
         

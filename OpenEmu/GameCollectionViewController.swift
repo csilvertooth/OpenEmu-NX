@@ -978,7 +978,7 @@ extension GameCollectionViewController: CollectionViewExtendedDelegate, NSMenuIt
     
     func collectionView(_ collectionView: CollectionView, doubleClickForItemAt indexPath: IndexPath) {
         guard selectedGames.count == 1 else { return }
-        NSApp.sendAction(#selector(LibraryController.startSelectedGame(_:)), to: nil, from: self)
+        NSApp.sendAction(#selector(LibraryGamesViewController.showSelectedGameDetails(_:)), to: nil, from: self)
     }
     
     func collectionView(_ collectionView: CollectionView, setTitle title: String, forItemAt indexPath: IndexPath) {
@@ -1157,7 +1157,7 @@ extension GameCollectionViewController: NSTableViewDataSource, NSTableViewDelega
     @objc func tableViewWasDoubleClicked(_ sender: Any?) {
         let row = listView.clickedRow
         guard row >= 0, let game = gamesDataSource.game(at: row) else { return }
-        NSApp.sendAction(#selector(LibraryController.start(game:)), to: nil, from: game)
+        NSApp.sendAction(#selector(LibraryGamesViewController.showSelectedGameDetails(_:)), to: nil, from: game)
     }
     
     func tableView(_ tableView: GameTableView, menuForItemsAt indexes: IndexSet) -> NSMenu? {

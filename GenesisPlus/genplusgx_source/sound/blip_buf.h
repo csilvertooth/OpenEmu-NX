@@ -75,6 +75,12 @@ int blip_mix_samples( blip_t* m1, blip_t* m2, blip_t* m3, short out [], int coun
 void blip_delete( blip_t* );
 
 
+
+/* NX rollback-only snapshots. Same core binary/rate required; not an on-disk save format. */
+int blip_snapshot_size(const blip_t *);
+int blip_snapshot_save(const blip_t *, void *, int);
+int blip_snapshot_load(blip_t *, const void *, int);
+
 /* Deprecated */
 typedef blip_t blip_buffer_t;
 

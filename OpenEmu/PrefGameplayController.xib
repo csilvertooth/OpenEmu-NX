@@ -86,7 +86,7 @@
                             </textField>
                         </gridCell>
                         <gridCell row="NYF-Xp-end" column="TUh-4W-YMM" id="9GN-RA-hIB">
-                            <button key="contentView" translatesAutoresizingMaskIntoConstraints="NO" id="5" userLabel="Check Box 1">
+                            <button customClass="NXDesignCheckbox" customModule="OpenEmu" customModuleProvider="target" key="contentView" translatesAutoresizingMaskIntoConstraints="NO" id="5" userLabel="Check Box 1">
                                 <rect key="frame" x="139" y="129" width="219" height="18"/>
                                 <buttonCell key="cell" type="check" title="Always launch games fullscreen" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="26" userLabel="Check Box Cell">
                                     <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -102,7 +102,7 @@
                         </gridCell>
                         <gridCell row="gwW-IR-buB" column="4tC-Ji-VhF" id="mEr-Bj-g6D"/>
                         <gridCell row="gwW-IR-buB" column="TUh-4W-YMM" id="Iqu-nh-gRu">
-                            <button key="contentView" translatesAutoresizingMaskIntoConstraints="NO" id="6" userLabel="Check Box 2">
+                            <button customClass="NXDesignCheckbox" customModule="OpenEmu" customModuleProvider="target" key="contentView" translatesAutoresizingMaskIntoConstraints="NO" id="6" userLabel="Check Box 2">
                                 <rect key="frame" x="139" y="107" width="252" height="18"/>
                                 <buttonCell key="cell" type="check" title="Always use popout gameplay window" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="25" userLabel="Check Box Cell">
                                     <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -118,7 +118,7 @@
                         </gridCell>
                         <gridCell row="Vje-Re-wNC" column="4tC-Ji-VhF" id="N6j-Ni-5NQ"/>
                         <gridCell row="Vje-Re-wNC" column="TUh-4W-YMM" id="KR5-yU-kVH">
-                            <button key="contentView" translatesAutoresizingMaskIntoConstraints="NO" id="FDo-ef-KF3" userLabel="Check Box 2">
+                            <button customClass="NXDesignCheckbox" customModule="OpenEmu" customModuleProvider="target" key="contentView" translatesAutoresizingMaskIntoConstraints="NO" id="FDo-ef-KF3" userLabel="Check Box 2">
                                 <rect key="frame" x="139" y="85" width="357" height="18"/>
                                 <buttonCell key="cell" type="check" title="Always snap popout gameplay window to integer scale" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="lgO-eK-Z0g" userLabel="Check Box Cell">
                                     <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -134,7 +134,7 @@
                         </gridCell>
                         <gridCell row="0ek-RE-3dE" column="4tC-Ji-VhF" id="rWq-sY-Ujs"/>
                         <gridCell row="0ek-RE-3dE" column="TUh-4W-YMM" id="Hu6-Be-BOV">
-                            <button key="contentView" translatesAutoresizingMaskIntoConstraints="NO" id="Nqc-Wa-hco" userLabel="Check Box 2">
+                            <button customClass="NXDesignCheckbox" customModule="OpenEmu" customModuleProvider="target" key="contentView" translatesAutoresizingMaskIntoConstraints="NO" id="Nqc-Wa-hco" userLabel="Check Box 2">
                                 <rect key="frame" x="139" y="63" width="300" height="18"/>
                                 <buttonCell key="cell" type="check" title="Always float popout gameplay window on top" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="A3u-oK-8c9" userLabel="Check Box Cell">
                                     <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -150,7 +150,7 @@
                         </gridCell>
                         <gridCell row="2nx-mB-NI1" column="4tC-Ji-VhF" id="zAD-ZG-w11"/>
                         <gridCell row="2nx-mB-NI1" column="TUh-4W-YMM" id="b8u-ae-67z">
-                            <button key="contentView" translatesAutoresizingMaskIntoConstraints="NO" id="56" userLabel="Check Box 3">
+                            <button customClass="NXDesignCheckbox" customModule="OpenEmu" customModuleProvider="target" key="contentView" translatesAutoresizingMaskIntoConstraints="NO" id="56" userLabel="Check Box 3">
                                 <rect key="frame" x="139" y="41" width="296" height="18"/>
                                 <buttonCell key="cell" type="check" title="Always pause gameplay when in background" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="57" userLabel="Check Box Cell">
                                     <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
@@ -166,7 +166,7 @@
                         </gridCell>
                         <gridCell row="yKY-8Y-qiL" column="4tC-Ji-VhF" id="btA-hR-Dul"/>
                         <gridCell row="yKY-8Y-qiL" column="TUh-4W-YMM" id="xoH-GT-cx1">
-                            <button key="contentView" translatesAutoresizingMaskIntoConstraints="NO" id="rUN-Tz-mZH" userLabel="Check Box 3">
+                            <button customClass="NXDesignCheckbox" customModule="OpenEmu" customModuleProvider="target" key="contentView" translatesAutoresizingMaskIntoConstraints="NO" id="rUN-Tz-mZH" userLabel="Check Box 3">
                                 <rect key="frame" x="139" y="19" width="329" height="18"/>
                                 <buttonCell key="cell" type="check" title="Allow playing with controllers when in background" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="zUK-Vv-IqE" userLabel="Check Box Cell">
                                     <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>

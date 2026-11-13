@@ -126,6 +126,8 @@ final class PrefControlsController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         
+        (view as? BackgroundImageView)?.designBackground = NXDesign.background
+        view.appearance = NSAppearance(named: .darkAqua)
         controlsSetupView.target = self
         controlsSetupView.action = #selector(changeInputControl(_:))
         

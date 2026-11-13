@@ -141,7 +141,7 @@ final class PrefGameplayController: NSViewController {
 
     // MARK: - Cheat settings
 
-    private let cheatWorksCheckbox = NSButton(checkboxWithTitle: "Show and share cheat ratings (CheatWorks)", target: nil, action: nil)
+    private let cheatWorksCheckbox = NXDesignCheckbox(checkboxWithTitle: "Show and share cheat ratings (CheatWorks)", target: nil, action: nil)
 
     private static let cheatWorksPrivacyURL = URL(string: "https://github.com/OpenEmu-Silicon/OpenEmu-Silicon/blob/main/docs/privacy-policy.md#cheatworks-community-cheat-ratings")!
 

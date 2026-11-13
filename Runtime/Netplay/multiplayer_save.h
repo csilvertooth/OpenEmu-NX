@@ -28,7 +28,10 @@ struct SaveIdentity {
  SaveDigest rom{},runtime{},initialState{};
  bool operator==(const SaveIdentity &b)const{return profile==b.profile && rom==b.rom && runtime==b.runtime && initialState==b.initialState;}
 };
-struct SaveRun {uint32_t frames;uint16_t player1,player2;};
+using SaveInputs=std::array<uint16_t,5>;
+struct SaveRun {uint32_t frames;uint16_t player1,player2;std::array<uint16_t,3> extra{};
+ SaveInputs inputs()const{return {player1,player2,extra[0],extra[1],extra[2]};}
+};
 // An input journal, never a serialized emulator object. A received journal is
 // replayed through the bounded joypad ABI after verifying identity/integrity.
 // These are parser/resource bounds, not lobby/account quotas. RLE handles long
@@ -36,16 +39,25 @@ struct SaveRun {uint32_t frames;uint16_t player1,player2;};
 class SaveJournal {
 public:
  static constexpr uint32_t MaxFrames=10000000,MaxRuns=1000000;
- static constexpr size_t MaxBytes=8u*MaxRuns+512u;
+ static constexpr size_t MaxBytes=14u*MaxRuns+512u;
+ unsigned players=2;
  SaveIdentity identity;
  SaveDigest finalState{};
  uint32_t frames()const{return frames_;}
  const std::vector<SaveRun> &runs()const{return runs_;}
- void append(uint32_t frame,uint16_t p1,uint16_t p2){
-  if(frame!=frames_+1 || frame>MaxFrames || (p1|p2)>4095)throw std::runtime_error("Invalid confirmed saved-game input");
-  if(!runs_.empty() && runs_.back().player1==p1 && runs_.back().player2==p2)++runs_.back().frames;
-  else{if(runs_.size()>=MaxRuns)throw std::runtime_error("Saved-game input history is full");runs_.push_back({1,p1,p2});}
+ void append(uint32_t frame,uint16_t p1,uint16_t p2){append(frame,SaveInputs{p1,p2,0,0,0});}
+ void append(uint32_t frame,const SaveInputs &pads){
+  if(players<2 || players>5 || frame!=frames_+1 || frame>MaxFrames)throw std::runtime_error("Invalid confirmed saved-game input");
+  for(unsigned p=0;p<5;++p)if(pads[p]>4095 || (p>=players && pads[p]))throw std::runtime_error("Invalid saved player input");
+  if(!runs_.empty() && runs_.back().inputs()==pads)++runs_.back().frames;
+  else{if(runs_.size()>=MaxRuns)throw std::runtime_error("Saved-game input history is full");runs_.push_back({1,pads[0],pads[1],{pads[2],pads[3],pads[4]}});}
   frames_=frame;
+ }
+ template<class Step> void replayPlayersTail(uint32_t after,Step step)const{
+  if(after>frames_ || frames_-after>59)throw std::runtime_error("Invalid confirmed save tail");
+  uint32_t end=0;for(const auto &run:runs_){uint32_t begin=end;end+=run.frames;
+   for(uint32_t f=std::max(after,begin)+1;f<=end;++f)step(f,run.inputs());
+  }
  }
  template<class Step,class Progress> void replay(Step step,Progress progress)const{
   uint32_t frame=0;for(const auto &run:runs_)for(uint32_t i=0;i<run.frames;++i){
@@ -63,10 +75,10 @@ public:
   }
  }
  Bytes encode()const{
-  validateIdentity(identity);if(!frames_ || runs_.empty())throw std::runtime_error("Cannot save an empty multiplayer game");
-  Bytes b{'E','M','U','X','J','N','L','1'};appendValue(b,1,2);appendValue(b,0,2);appendValue(b,frames_,4);appendValue(b,runs_.size(),4);appendValue(b,identity.profile.size(),2);appendValue(b,0,2);
+  validateIdentity(identity);if(players<2 || players>5)throw std::runtime_error("Invalid saved player count");if(!frames_ || runs_.empty())throw std::runtime_error("Cannot save an empty multiplayer game");
+  Bytes b{'E','M','U','X','J','N','L','1'};appendValue(b,players>2?2:1,2);appendValue(b,players>2?players:0,2);appendValue(b,frames_,4);appendValue(b,runs_.size(),4);appendValue(b,identity.profile.size(),2);appendValue(b,0,2);
   for(const auto &d:{identity.rom,identity.runtime,identity.initialState,finalState})b.insert(b.end(),d.begin(),d.end());
-  b.insert(b.end(),identity.profile.begin(),identity.profile.end());for(const auto &run:runs_){appendValue(b,run.frames,4);appendValue(b,run.player1,2);appendValue(b,run.player2,2);}
+  b.insert(b.end(),identity.profile.begin(),identity.profile.end());for(const auto &run:runs_){appendValue(b,run.frames,4);appendValue(b,run.player1,2);appendValue(b,run.player2,2);for(unsigned p=2;p<players;++p)appendValue(b,run.extra[p-2],2);}
   auto digest=saveDigest(b);b.insert(b.end(),digest.begin(),digest.end());return b;
  }
  static SaveJournal decode(const Bytes &b,const SaveIdentity &expected){
@@ -74,16 +86,19 @@ public:
   constexpr size_t fixed=24+128+32;
   if(b.size()<fixed || b.size()>MaxBytes || !std::equal(b.begin(),b.begin()+8,"EMUXJNL1"))throw std::runtime_error("Invalid multiplayer save format");
   Bytes body(b.begin(),b.end()-32);auto digest=saveDigest(body);if(!std::equal(digest.begin(),digest.end(),b.end()-32))throw std::runtime_error("Multiplayer save integrity check failed");
-  Reader r{body};r.pos=8;if(r.get(2)!=1 || r.get(2)!=0)throw std::runtime_error("Unsupported multiplayer save version");
+  Reader r{body};r.pos=8;unsigned version=r.get(2),flags=r.get(2);
+  if((version!=1 || flags!=0) && (version!=2 || flags<3 || flags>5))throw std::runtime_error("Unsupported multiplayer save version");
+  unsigned players=version==1?2:flags;
   auto frames=uint32_t(r.get(4)),count=uint32_t(r.get(4));unsigned profileLength=unsigned(r.get(2));
-  if(r.get(2)!=0 || !frames || frames>MaxFrames || !count || count>MaxRuns || !profileLength || profileLength>128 || body.size()!=24+128+profileLength+size_t(count)*8)throw std::runtime_error("Invalid multiplayer save bounds");
-  SaveJournal j;for(auto *d:{&j.identity.rom,&j.identity.runtime,&j.identity.initialState,&j.finalState})for(auto &value:*d)value=uint8_t(r.get(1));
+  if(r.get(2)!=0 || !frames || frames>MaxFrames || !count || count>MaxRuns || !profileLength || profileLength>128 || body.size()!=24+128+profileLength+size_t(count)*(4+2*players))throw std::runtime_error("Invalid multiplayer save bounds");
+  SaveJournal j;j.players=players;for(auto *d:{&j.identity.rom,&j.identity.runtime,&j.identity.initialState,&j.finalState})for(auto &value:*d)value=uint8_t(r.get(1));
   for(unsigned i=0;i<profileLength;++i)j.identity.profile+=char(r.get(1));validateIdentity(j.identity);
   if(!(j.identity==expected))throw std::runtime_error("Saved game requires the same ROM and runtime");
   uint64_t total=0;j.runs_.reserve(count);
   for(uint32_t i=0;i<count;++i){SaveRun run{uint32_t(r.get(4)),uint16_t(r.get(2)),uint16_t(r.get(2))};
+   for(unsigned p=2;p<players;++p){run.extra[p-2]=uint16_t(r.get(2));if(run.extra[p-2]>4095)throw std::runtime_error("Invalid saved player input");}
    total+=run.frames;if(!run.frames || (run.player1|run.player2)>4095 || total>frames)throw std::runtime_error("Invalid saved-game input history");
-   if(!j.runs_.empty() && run.player1==j.runs_.back().player1 && run.player2==j.runs_.back().player2)throw std::runtime_error("Noncanonical saved-game input history");
+   if(!j.runs_.empty() && run.inputs()==j.runs_.back().inputs())throw std::runtime_error("Noncanonical saved-game input history");
    j.runs_.push_back(run);
   }
   if(total!=frames)throw std::runtime_error("Incomplete saved-game input history");r.end();j.frames_=frames;return j;

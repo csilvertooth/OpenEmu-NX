@@ -74,6 +74,7 @@ final class NXROMHackController: NSWindowController, NSTableViewDataSource, NSTa
             reloadBases()
             if let patch { setPatch(patch) }
         }
+        if let window { NXDesign.apply(to: window) }
         showWindow(nil); window?.makeKeyAndOrderFront(nil)
     }
     private func button(_ title: String, _ action: Selector) -> NSButton {

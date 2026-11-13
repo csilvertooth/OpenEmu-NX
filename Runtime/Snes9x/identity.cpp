@@ -9,6 +9,7 @@
 #include <vector>
 #include <memory>
 #include <stdexcept>
+#include "../Netplay/runtime_loader.h"
 using Bytes=std::vector<unsigned char>;
 static Bytes read(const char *path) {
     std::ifstream f(path,std::ios::binary|std::ios::ate);
@@ -25,10 +26,10 @@ int main(int argc,char **argv) {
         if(argc!=2)return 2;
         Bytes rom=read(argv[1]);emu_runtime *raw=nullptr;
         if(emu_create(EMU_RUNTIME_ABI,rom.data(),uint32_t(rom.size()),&raw))return 3;
-        std::unique_ptr<emu_runtime,decltype(&emu_destroy)> runtime(raw,emu_destroy);
+        std::unique_ptr<emu_runtime,decltype(emu_destroy)> runtime(raw,emu_destroy);
         uint32_t size;if(emu_state_size(raw,&size))return 4;
         Bytes state(size);if(emu_state_copy(raw,state.data(),size))return 4;
-        Dl_info loaded{};if(!dladdr(reinterpret_cast<void*>(&emu_create),&loaded))return 5;
+        Dl_info loaded{};if(!dladdr(reinterpret_cast<void*>(emu_create),&loaded))return 5;
         std::cout<<"{\"protocol\":1,\"profile\":\""<<emu_runtime_profile()<<"\",\"rom_sha256\":\""<<digest(rom)
                  <<"\",\"runtime_sha256\":\""<<digest(read(loaded.dli_fname))<<"\",\"initial_state_sha256\":\""<<digest(state)<<"\"}\n";
         return 0;

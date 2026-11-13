@@ -32,18 +32,18 @@ final class ControlsKeyButton: NSButton {
     
     override func draw(_ dirtyRect: NSRect) {
         
-        var image: NSImage?
-        if isWood {
-            image = state == .on ? NSImage(named: "wood_textfield_focus") : NSImage(named: "wood_textfield")
-        } else {
-            image = state == .on ? NSImage(named: "controls_textfield_focus")?.withTintColor(.controlAccentColor) : NSImage(named: "controls_textfield")
-        }
-        image?.draw(in: bounds)
-        
-        let p = NSPoint(x: bounds.origin.x + 4, y: bounds.origin.y + (isFlipped ? 4 : 6))
-        title.draw(at: p, withAttributes: isWood ? Self.attributesWood : Self.attributes)
+        let rect = bounds.insetBy(dx: 1, dy: 1)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
+        (state == .on ? NXDesign.accent.withAlphaComponent(0.25) : NXDesign.sidebar).setFill()
+        path.fill()
+        (state == .on ? NXDesign.accent : NXDesign.border).setStroke()
+        path.lineWidth = state == .on ? 2 : 1; path.stroke()
+        if isHighlighted { NSColor.white.withAlphaComponent(0.12).setFill(); path.fill() }
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NXDesign.foreground]
+        let size = (title as NSString).size(withAttributes: attributes)
+        title.draw(at: NSPoint(x: 8, y: (bounds.height - size.height) / 2), withAttributes: attributes)
     }
-    
+
     private static let attributes: [NSAttributedString.Key : Any]? = {
         
         let attributes: [NSAttributedString.Key : Any] =

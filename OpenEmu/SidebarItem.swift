@@ -32,3 +32,30 @@ protocol SidebarItem: NSObjectProtocol {
     var isEditableInSidebar: Bool { get }
     var hasSubCollections: Bool { get }
 }
+
+/// Non-library-data destinations share the sidebar with consoles and collections.
+final class SidebarDestinationItem: NSObject, SidebarItem {
+    let category: LibraryController.Category
+    init(category: LibraryController.Category) { self.category = category }
+    var sidebarName: String {
+        switch category {
+        case .games: return "All Games"
+        case .saveStates: return "Save States"
+        case .screenshots: return "Screenshots"
+        case .homebrew: return "Homebrew"
+        }
+    }
+    var sidebarIcon: NSImage? {
+        let symbol: String
+        switch category {
+        case .games: symbol = "square.grid.2x2"
+        case .saveStates: symbol = "externaldrive"
+        case .screenshots: symbol = "photo.on.rectangle"
+        case .homebrew: symbol = "leaf"
+        }
+        return NSImage(systemSymbolName: symbol, accessibilityDescription: sidebarName)
+    }
+    var sidebarID: String? { "nx.destination.\(category.rawValue)" }
+    let isEditableInSidebar = false
+    let hasSubCollections = false
+}

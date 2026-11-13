@@ -64,3 +64,19 @@ add_test(NAME bounded-lobby-retry COMMAND emu-lobby-retry-tests)
 
 add_executable(emu-access-token-tests access_token_tests.cpp)
 add_test(NAME installation-access-token COMMAND emu-access-token-tests)
+
+# Native plugin backend is optional for command-line-only builds.
+set(OE_FRAMEWORK_DIR "" CACHE PATH "Built OpenEmu SDK frameworks")
+if(OE_FRAMEWORK_DIR)
+    add_library(emu_openemu SHARED ../OpenEmu/runtime.mm)
+    target_compile_options(emu_openemu PRIVATE -fobjc-arc "-F${OE_FRAMEWORK_DIR}")
+    target_link_options(emu_openemu PRIVATE "-F${OE_FRAMEWORK_DIR}")
+    target_link_libraries(emu_openemu PRIVATE "-framework Cocoa" "-framework OpenEmuBase")
+    set_target_properties(emu_openemu PROPERTIES BUILD_RPATH "${OE_FRAMEWORK_DIR};@loader_path/../../Frameworks;@loader_path/../../../../../Frameworks")
+    add_dependencies(emu-live emu_openemu)
+endif()
+
+add_executable(emu-multitap-tests multitap_tests.cpp)
+target_include_directories(emu-multitap-tests PRIVATE ../Snes9x "${DEPS_ROOT}/include")
+target_link_libraries(emu-multitap-tests PRIVATE emu_runtime "${DEPS_ROOT}/lib/libcrypto.a")
+set_target_properties(emu-multitap-tests PROPERTIES BUILD_RPATH "@loader_path")

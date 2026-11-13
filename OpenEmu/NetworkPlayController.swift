@@ -123,16 +123,85 @@ private final class NetworkInputResponder: OESystemResponder, OESystemResponderC
     func stepFrameBackward() {}
 }
 
+// Identifier fields must not open prose-completion panels. AppKit's
+// automaticTextCompletionEnabled controls Touch Bar candidates, not the regular
+// completion panel, so also suppress the documented NSCompletion entry points.
 @MainActor
-final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTabViewDelegate, NSSplitViewDelegate {
+private final class NetworkPlayIdentifierEditor: NSTextView {
+    func configurePlainInput() {
+        isRichText = false
+        isAutomaticTextCompletionEnabled = false
+        isAutomaticTextReplacementEnabled = false
+        isAutomaticSpellingCorrectionEnabled = false
+        isContinuousSpellCheckingEnabled = false
+        isGrammarCheckingEnabled = false
+        isAutomaticQuoteSubstitutionEnabled = false
+        isAutomaticDashSubstitutionEnabled = false
+        isAutomaticLinkDetectionEnabled = false
+        isAutomaticDataDetectionEnabled = false
+        enabledTextCheckingTypes = 0
+        if #available(macOS 14.0, *) { inlinePredictionType = .no }
+        if #available(macOS 15.0, *) {
+            writingToolsBehavior = .none
+            mathExpressionCompletionType = .no
+        }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        // NSTextField configures its field editor after requesting it from the
+        // window delegate. Apply the policy at editing time, not only at init.
+        configurePlainInput()
+        let accepted = super.becomeFirstResponder()
+        configurePlainInput()
+        return accepted
+    }
+
+    // AppKit may reapply the user's text preferences after first responder
+    // setup. Keep these policies fixed for identifiers rather than allowing
+    // a later field-editor configuration to re-enable suggestion panels.
+    override var isAutomaticTextCompletionEnabled: Bool {
+        get { false }
+        set { super.isAutomaticTextCompletionEnabled = false }
+    }
+    override var isAutomaticSpellingCorrectionEnabled: Bool {
+        get { false }
+        set { super.isAutomaticSpellingCorrectionEnabled = false }
+    }
+    @available(macOS 14.0, *)
+    override var inlinePredictionType: NSTextInputTraitType {
+        get { .no }
+        set { super.inlinePredictionType = .no }
+    }
+    override var rangeForUserCompletion: NSRange { NSRange(location: NSNotFound, length: 0) }
+    override func complete(_ sender: Any?) {}
+    override func completions(forPartialWordRange charRange: NSRange,
+                              indexOfSelectedItem index: UnsafeMutablePointer<Int>) -> [String]? { [] }
+    override func updateCandidates() {}
+}
+
+@MainActor
+final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTabViewDelegate, NSSplitViewDelegate, NSWindowDelegate {
     static let shared = NetworkPlayController()
     private let defaults = UserDefaults.standard
     private let prefix = "networkPlay."
+    private lazy var identifierEditor: NetworkPlayIdentifierEditor = {
+        let editor = NetworkPlayIdentifierEditor()
+        editor.isFieldEditor = true
+        editor.configurePlainInput()
+        return editor
+    }()
+    func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
+        guard let field = client as? NSTextField,
+              [title, name, hostName, invite].contains(where: { $0 === field }) else { return nil }
+        return identifierEditor
+    }
     private var panel: NSWindow!
     private let tabs = NSTabView()
+    private var designNavigation: [NXDesignButton] = []
     private let navigation = NSSegmentedControl(labels: ["Host Game", "Join Game", "Relays", "Settings"], trackingMode: .selectOne, target: nil, action: nil)
     private let joinIdentity = NSTextField(wrappingLabelWithString: "")
     private let romMatch = NSTextField(wrappingLabelWithString: "")
+    private let keepUncompressed = NXDesignCheckbox(checkboxWithTitle: "Keep uncompressed copies for netplay", target: nil, action: nil)
     private var verifiedSHA: String?
     private var downloadButton: NSButton!
     private var exportButton: NSButton!
@@ -160,16 +229,21 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     private var liveRTT = -1
     private let delay = NSPopUpButton()
     private let title = NSTextField(string: "")
-    private let publicRoom = NSButton(checkboxWithTitle: "List this game publicly", target: nil, action: nil)
-    private let protectedRoom = NSButton(checkboxWithTitle: "Require a room password", target: nil, action: nil)
+    private let playerLimit = NSPopUpButton()
+    private var joiningPlayerCount: Int?
+    private var selectedPlayerCount: Int {
+        room?["capacity"] as? Int ?? joiningPlayerCount ?? (selectedROM?.game?.system?.systemIdentifier == "openemu.system.snes" ? max(2, playerLimit.indexOfSelectedItem + 2) : 2)
+    }
+    private let publicRoom = NXDesignCheckbox(checkboxWithTitle: "List this game publicly", target: nil, action: nil)
+    private let protectedRoom = NXDesignCheckbox(checkboxWithTitle: "Require a room password", target: nil, action: nil)
     private let password = NSSecureTextField(string: "")
-    private let shareROM = NSButton(checkboxWithTitle: "Allow game downloads for players", target: nil, action: nil)
+    private let shareROM = NXDesignCheckbox(checkboxWithTitle: "Allow game downloads for players", target: nil, action: nil)
     private var transferProcess: Process?
     private let transferProgress = NSProgressIndicator()
     private var promptedROMRequests = Set<String>()
     private var connectPulseActive = false
     private let cancelTransferButton = NSButton(title: "Cancel ROM Transfer", target: nil, action: nil)
-    private let spectators = NSButton(checkboxWithTitle: "Allow spectators", target: nil, action: nil)
+    private let spectators = NXDesignCheckbox(checkboxWithTitle: "Allow spectators", target: nil, action: nil)
     private let spectatorLimit = NSPopUpButton()
     private let invite = NSTextField(string: "")
     private let joinPassword = NSSecureTextField(string: "")
@@ -287,7 +361,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         return stack
     }
     private func button(_ title: String, _ action: Selector) -> NSButton {
-        let result = NSButton(title: title, target: self, action: action)
+        let result = NXDesignButton(title: title, target: self, action: action)
         result.bezelStyle = .rounded; operationButtons.append(result); return result
     }
     private func tab(_ title: String, _ views: [NSView]) {
@@ -322,17 +396,17 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         } else { item.view = scroll }
         tabs.addTabViewItem(item)
     }
-    private func settingsColumn(_ heading: String, _ views: [NSView]) -> NSStackView {
+    private func settingsColumn(_ heading: String, _ views: [NSView]) -> NSView {
         let headingLabel = label(heading); headingLabel.font = .boldSystemFont(ofSize: 14)
         let stack = NSStackView(views: [headingLabel] + views)
-        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
         for view in views {
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             view.setContentHuggingPriority(.required, for: .vertical)
         }
         stack.setContentHuggingPriority(.required, for: .vertical)
         stack.distribution = .fill
-        return stack
+        return NXContentSurface(content: stack)
     }
     private func fieldGroup(_ caption: String, _ control: NSView) -> NSStackView {
         let captionLabel = label(caption)
@@ -348,6 +422,8 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 940, height: 940),
                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         panel.title = "Network Play"; panel.isReleasedWhenClosed = false
+        NXDesign.apply(to: panel)
+        panel.delegate = self
         panel.titleVisibility = .hidden
         if let frameView = panel.contentView?.superview, let close = panel.standardWindowButton(.closeButton) {
             let centeredTitle = label("Network Play"); centeredTitle.font = .boldSystemFont(ofSize: 13)
@@ -378,10 +454,20 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         delay.addItems(withTitles: (1...12).map { "\($0) frames" })
         delay.selectItem(at: min(max(defaults.integer(forKey: prefix + "delay") - 1, 0), 11))
         if defaults.object(forKey: prefix + "delay") == nil { delay.selectItem(at: 2) }
-        title.placeholderString = "Enter Room Name Here"
+        // Room/player names and invite codes are plain identifiers, not prose.
+        // Keep system completion and Writing Tools popovers out of this form.
+        for field in [title, name, hostName, invite] {
+            field.isAutomaticTextCompletionEnabled = false
+            if #available(macOS 15.2, *) { field.allowsWritingTools = false }
+        }
+        title.placeholderString = "Leave blank to use the game name"
+        title.stringValue = defaults.string(forKey: prefix + "roomName") ?? ""
         publicRoom.state = defaults.bool(forKey: prefix + "public") ? .on : .off
         protectedRoom.state = defaults.bool(forKey: prefix + "passwordRequired") ? .on : .off
         spectators.state = defaults.bool(forKey: prefix + "spectators") ? .on : .off
+        playerLimit.addItems(withTitles: (2...5).map { "\($0) players" })
+        playerLimit.target = self; playerLimit.action = #selector(optionsChanged)
+        playerLimit.toolTip = "SNES multitap is experimental. Choose the number supported by this game; all selected players must join before starting."
         spectatorLimit.addItems(withTitles: (1...16).map(String.init))
         spectatorLimit.selectItem(at: min(max(defaults.integer(forKey: prefix + "spectatorLimit") - 1, 0), 15))
         if defaults.object(forKey: prefix + "spectatorLimit") == nil { spectatorLimit.selectItem(at: 3) }
@@ -452,21 +538,32 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         joinItem.view = joinHolder; tabs.addTabViewItem(joinItem)
         tab("Relays", [makeDirectoryTable(relayTable, columns: [("name", "Relay / Region", 220), ("operator", "Operator", 180), ("health", "Status", 140)]),
                        NSStackView(views: [button("Refresh Relays", #selector(refreshDirectory)), button("Use Selected Relay", #selector(useSelectedRelay)), button("Register a Relay…", #selector(registerRelay))])])
-        tab("Settings", [row("Lobby server", endpoint), row("Connection", route),
-                         row("STUN service", stunProvider), row("Custom server", customSTUN),
-                         label("STUN discovers a route; it does not carry gameplay. The selected provider sees your public network address. Changes apply to the next connection."),
-                         button("Check Network…", #selector(checkNetwork)), networkResult,
-                         row("Input response", label("Rollback · no added input delay")),
-                         label("Both players need a rollback-compatible build. Automatic negotiates a direct connection or a configured relay. Relay only requires a lobby with TURN service. Internet lobbies require HTTPS."), saveButton])
+        keepUncompressed.state = defaults.bool(forKey: prefix + "keepUncompressed") ? .on : .off
+        keepUncompressed.target = self; keepUncompressed.action = #selector(saveROMCachePreference)
+        let connectionSettings = settingsColumn("Connection", [
+            fieldGroup("Lobby server", endpoint), fieldGroup("Connection preference", route),
+            fieldGroup("STUN service", stunProvider), fieldGroup("Custom STUN server", customSTUN),
+            label("Direct play is tried first. A relay carries gameplay only when a direct connection is unavailable."),
+            button("Check Network…", #selector(checkNetwork)), networkResult])
+        let loadingSettings = settingsColumn("Game Loading", [keepUncompressed,
+            label("Keep an extracted copy for faster netplay loading. This uses additional disk space; original ROMs and saves stay unchanged."),
+            fieldGroup("Input response", label("Rollback · no added input delay")),
+            label("Each player uses their own saved controller settings."),
+            label("STUN discovers connection routes. The selected provider sees your public network address. Changes apply to the next connection.")])
+        let settingsGroups = NSStackView(views: [connectionSettings, loadingSettings])
+        settingsGroups.orientation = .horizontal; settingsGroups.alignment = .top
+        settingsGroups.spacing = 20; settingsGroups.distribution = .fillEqually
+        tab("Settings", [settingsGroups, saveButton])
         chooseButton = button("Choose Game…", #selector(chooseGame))
         copyButton = button("Copy Invite", #selector(copyInvite))
         leaveButton = button("Leave Room", #selector(leaveRoom))
         launchButton = button("Create Room", #selector(primaryRoomAction))
         gameArtwork.imageScaling = .scaleProportionallyUpOrDown
         gameArtwork.setAccessibilityLabel("Selected game artwork")
-        gameArtwork.widthAnchor.constraint(equalToConstant: 60).isActive = true
-        gameArtwork.heightAnchor.constraint(equalToConstant: 72).isActive = true
-        gameLabel.font = .boldSystemFont(ofSize: 16)
+        NXDesign.addArtworkShadow(to: gameArtwork)
+        gameArtwork.widthAnchor.constraint(equalToConstant: 140).isActive = true
+        gameArtwork.heightAnchor.constraint(equalToConstant: 120).isActive = true
+        gameLabel.font = .boldSystemFont(ofSize: 21)
         gameValidation.font = .systemFont(ofSize: 12)
         let details = NSStackView(views: [gameLabel, gameValidation]); details.orientation = .vertical; details.alignment = .leading
         let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -483,10 +580,10 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             fieldGroup("Saved Multiplayer Session", resumeActions), resumeLabel])
         let downloadHint = label("Players only, with your approval. Spectators cannot download games.")
         downloadHint.textColor = .secondaryLabelColor
-        let accessColumn = settingsColumn("Access & Players", [publicRoom, protectedRoom,
-            password, spectators, fieldGroup("Spectator limit", spectatorLimit), shareROM, downloadHint])
+        let accessColumn = settingsColumn("Access & Players", [fieldGroup("Players", playerLimit), publicRoom, protectedRoom,
+            fieldGroup("Room password", password), spectators, fieldGroup("Spectator limit", spectatorLimit), shareROM, downloadHint])
         let columns = NSStackView(views: [roomColumn, accessColumn])
-        columns.orientation = .horizontal; columns.alignment = .top; columns.spacing = 32; columns.distribution = .fillEqually
+        columns.orientation = .horizontal; columns.alignment = .top; columns.spacing = 20; columns.distribution = .fillEqually
         roomColumn.widthAnchor.constraint(equalTo: accessColumn.widthAnchor).isActive = true
         let createActions = NSStackView(views: [NSView(), updateButton])
         tab("Host Game", [columns, createActions])
@@ -500,7 +597,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             primary.controlSize = .large; primary.font = .boldSystemFont(ofSize: 15)
             primary.heightAnchor.constraint(equalToConstant: 44).isActive = true
             primary.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
-            primary.bezelColor = .controlAccentColor
+            (primary as? NXDesignButton)?.primary = true
         }
         downloadButton = button("Download Game…", #selector(downloadGame))
         exportButton = button("Export Multiplayer Save…", #selector(saveMultiplayerGame))
@@ -515,7 +612,20 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             view.setContentCompressionResistancePriority(.required, for: .vertical)
             view.setContentHuggingPriority(.required, for: .vertical)
         }
-        let navigationSurface = glassSurface(navigation, inset: 4)
+        designNavigation = ["Host Game", "Join Game", "Relays", "Settings"].enumerated().map { index, title in
+            let button = NXDesignButton(title: title, target: nil, action: nil)
+            button.tabStyle = true; button.filledTab = true; button.selected = index == 0
+            button.handler = { [weak self, weak button] in
+                guard let self else { return }
+                self.navigation.selectedSegment = index
+                self.panel.makeFirstResponder(button)
+                self.selectSection()
+            }
+            button.target = button; button.action = #selector(NXDesignButton.invoke)
+            return button
+        }
+        let navigationSurface = NSStackView(views: designNavigation)
+        navigationSurface.spacing = 28
         // Keep actions as floating native glass controls, not a full-width glass slab.
         let actionSurface = actions
         actions.alignment = .centerY
@@ -553,6 +663,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             split.heightAnchor.constraint(greaterThanOrEqualToConstant: 320),
             actionSurface.widthAnchor.constraint(equalTo: stack.widthAnchor)])
         split.setContentHuggingPriority(.defaultLow, for: .vertical)
+        NXDesign.apply(to: panel)
         panel.contentView?.layoutSubtreeIfNeeded()
         layoutStatusSplit(split)
         footer.setContentHuggingPriority(.required, for: .vertical)
@@ -586,6 +697,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     @objc private func optionsChanged() { hostOptionsDirty = room?["role"] as? String == "host"; refreshControls() }
     private func refreshControls() {
         guard panel != nil else { return }
+        for (index, button) in designNavigation.enumerated() { button.selected = index == navigation.selectedSegment }
         updatePageLayout()
         roomStatus.isHidden = roomStatus.stringValue.isEmpty
         romMatch.isHidden = romMatch.stringValue.isEmpty
@@ -596,7 +708,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         newGameButton.isHidden = resumeURL == nil
         newGameButton.isEnabled = !busy && room == nil && resumeURL != nil
         let isHost = room?["role"] as? String == "host"
-        let waitingForPlayer = isHost && (room?["occupancy"] as? Int ?? 0) < 2
+        let waitingForPlayer = isHost && (room?["occupancy"] as? Int ?? 0) < selectedPlayerCount
         let waitingForHost = room != nil && !isHost && room?["state"] as? String != "playing"
         let transferState = (room?["rom_request"] as? [String: Any])?["status"] as? String
         let transferPending = transferProcess != nil || room?["state"] as? String == "transferring" || transferState == "pending" || transferState == "approved"
@@ -606,11 +718,12 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         let selectedHost = listedRooms.indices.contains(roomList.selectedRow) ? listedRooms[roomList.selectedRow] : nil
         let joinTitle = hasInvite ? "Join by Code" : selectedHost.map { "Join " + String(($0["host_name"] as? String ?? $0["title"] as? String ?? "Host").prefix(32)) } ?? "Join Game"
         launchButton.title = creatingRoom ? "Create Room" : joiningRoom ? joinTitle : gameConnected ? "Connected" : (gameLaunching || gameProcess != nil) ? "Connecting…" : waitingForHost ? "Waiting for host to start…" : isHost ? "Start Game" : "Connect to Game"
+        playerLimit.isEnabled = !busy && room == nil && gameProcess == nil && selectedROM?.game?.system?.systemIdentifier == "openemu.system.snes"
         relayPicker.isEnabled = !busy && room == nil && gameProcess == nil
         launchButton.isEnabled = !busy && gameProcess == nil && (creatingRoom ? selectedROM != nil : joiningRoom ? (!name.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && (hasInvite || selectedHost != nil)) : room != nil && !waitingForPlayer && !waitingForHost && !transferPending && verifiedSHA != nil)
         launchButton.isHidden = navigation.selectedSegment > 1
         launchButton.keyEquivalent = launchButton.isEnabled && !launchButton.isHidden ? "\r" : ""
-        launchButton.toolTip = waitingForPlayer ? "Waiting for another player to join before starting." : nil
+        launchButton.toolTip = waitingForPlayer ? "Waiting for all selected players to join before starting." : nil
         updateConnectPulse(launchButton.isEnabled && room != nil && !gameConnected)
         createButton.isEnabled = !busy && room == nil && gameProcess == nil
         joinButton.isEnabled = !busy && room == nil && gameProcess == nil
@@ -737,8 +850,8 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     @objc private func launchGame() {
         guard #available(macOS 14.0, *) else { status.stringValue = "This Network Play preview requires macOS 14 or newer."; return }
         guard !busy, gameProcess == nil, let base = activeEndpoint, let id = room?["id"] as? String,
-              let rom = selectedROM, !rom.isDeleted, let url = rom.url else { status.stringValue = "Choose your library game and join a room first."; return }
-        if room?["role"] as? String == "host" && (room?["occupancy"] as? Int ?? 1) < 2 {
+              let rom = selectedROM, !rom.isDeleted, rom.url != nil else { status.stringValue = "Choose your library game and join a room first."; return }
+        if room?["role"] as? String == "host" && (room?["occupancy"] as? Int ?? 1) < selectedPlayerCount {
             status.stringValue = "Share your invite and wait for the second player to join, then choose Start Game."; return
         }
         gameLaunching = true
@@ -746,7 +859,9 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             defer { self.gameLaunching = false }
             let expected = (self.room?["compatibility"] as? [String: Any])?["rom_sha256"] as? String
             _ = try await self.identity(expectedSHA: expected)
+            let url = try await self.preparedROM(rom).url
             let process = Process(), input = Pipe(), output = Pipe()
+            process.environment = try self.runtimeEnvironment(for: rom.game?.system?.systemIdentifier)
             let launchID = UUID()
             let diagnostics = FileManager.default.temporaryDirectory
                 .appendingPathComponent("OpenEmu-NX-NetworkPlay-" + launchID.uuidString + ".json")
@@ -765,7 +880,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             if self.room?["role"] as? String == "host" {
                 let folder = URL.oeApplicationSupportDirectory.appendingPathComponent("Multiplayer Sessions/Autosaves", isDirectory: true)
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                let autosave = folder.appendingPathComponent(UUID().uuidString).appendingPathExtension("emuxsave")
+                let autosave = self.newMultiplayerSaveURL(in: folder)
                 self.currentAutosaveURL = autosave; config["autosave_path"] = autosave.path
                 if let resume = self.resumeURL { config["resume_path"] = resume.path }
             }
@@ -854,19 +969,62 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     }
     @objc private func chooseMultiplayerSave() {
         guard room == nil, gameProcess == nil else { return }
-        let chooser = NSOpenPanel(); chooser.title = "Resume Multiplayer Game"
-        chooser.allowedFileTypes = ["emuxsave"]; chooser.allowsMultipleSelection = false
-        chooser.canChooseDirectories = false
-        let folder = URL.oeApplicationSupportDirectory.appendingPathComponent("Multiplayer Sessions/Autosaves", isDirectory: true)
-        do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
-        catch { status.stringValue = "Could not open multiplayer saves: " + error.localizedDescription; return }
-        chooser.directoryURL = folder
-        guard chooser.runModal() == .OK, let url = chooser.url else { return }
+        let browser = NXMultiplayerSavesViewController()
+        let window = NSWindow()
+        browser.onClose = { [weak self, weak window] in
+            if let window { self?.panel.endSheet(window) }
+        }
+        window.contentViewController = browser
+        window.title = "Multiplayer Saves"
+        window.styleMask = [.titled, .closable, .resizable]
+        window.setContentSize(NSSize(width: 760, height: 520))
+        window.minSize = NSSize(width: 620, height: 360)
+        browser.onResume = { [weak self, weak window] url in
+            if let window { self?.panel.endSheet(window) }
+            self?.selectMultiplayerSave(url)
+        }
+        panel.beginSheet(window)
+    }
+    static func isActiveMultiplayerSave(_ url: URL) -> Bool {
+        shared.gameProcess != nil && shared.currentAutosaveURL?.standardizedFileURL == url.standardizedFileURL
+    }
+    private func newMultiplayerSaveURL(in folder: URL) -> URL {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH-mm-ss"
+        let game = selectedROM?.game?.displayName ?? "Multiplayer Game"
+        let safeGame = String(game.components(separatedBy: CharacterSet(charactersIn: "/:\\").union(.controlCharacters)).joined(separator: "-").prefix(90))
+        let stem = "\(safeGame) — \(formatter.string(from: Date())) — \(selectedPlayerCount) players"
+        var result = folder.appendingPathComponent(stem).appendingPathExtension("emuxsave")
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: result.path) {
+            result = folder.appendingPathComponent("\(stem) (\(suffix))").appendingPathExtension("emuxsave")
+            suffix += 1
+        }
+        return result
+    }
+    static func resumeSavedSession(_ url: URL, game: OEDBGame? = nil) {
+        if let game {
+            guard shared.prepareLibraryGameForHosting(game) else { return }
+        } else { shared.show(0) }
+        shared.selectMultiplayerSave(url)
+    }
+    private func selectMultiplayerSave(_ url: URL) {
+        guard room == nil, gameProcess == nil else {
+            let alert = NSAlert(); alert.messageText = "Leave the current room before resuming a saved session."
+            alert.runModal(); return
+        }
         do {
             let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
-            guard values.isRegularFile == true, let size = values.fileSize, size > 0, size <= 8_000_512 else { throw fail("This is not a supported multiplayer save.") }
+            guard values.isRegularFile == true, let size = values.fileSize, size > 0, size <= 14_000_512 else { throw fail("This is not a supported multiplayer save.") }
+            let header = try Data(contentsOf: url).prefix(12)
+            if header.count == 12, header.prefix(8) == Data("EMUXJNL1".utf8), header[8] == 2, (3...5).contains(Int(header[10])) {
+                playerLimit.selectItem(at: Int(header[10]) - 2)
+            } else { playerLimit.selectItem(at: 0) }
             resumeURL = url; resumeLabel.stringValue = "Resume: " + url.lastPathComponent
-            status.stringValue = "Choose the matching library game, then create a new room. Both players verify the saved game before starting."
+            status.stringValue = selectedROM == nil
+                ? "Choose the matching library game, then create a room. All players verify the saved game before starting."
+                : "Saved session selected for \(selectedROM?.game?.displayName ?? "the selected game"). Create a room to resume; all players verify the saved game before starting."
             refreshControls()
         } catch { status.stringValue = error.localizedDescription }
     }
@@ -877,13 +1035,13 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         guard let source = currentAutosaveURL else { return }
         do {
             let values = try source.resourceValues(forKeys: [.fileSizeKey])
-            guard let size = values.fileSize, size > 0, size <= 8_000_512 else { throw fail("A confirmed multiplayer save is not ready yet.") }
+            guard let size = values.fileSize, size > 0, size <= 14_000_512 else { throw fail("A confirmed multiplayer save is not ready yet.") }
             // The runtime atomically replaces this file; capture one complete
             // version before showing the destination panel.
             let data = try Data(contentsOf: source)
-            guard data.count <= 8_000_512, data.prefix(8) == Data("EMUXJNL1".utf8) else { throw fail("The multiplayer save could not be read.") }
+            guard data.count <= 14_000_512, data.prefix(8) == Data("EMUXJNL1".utf8) else { throw fail("The multiplayer save could not be read.") }
             let chooser = NSSavePanel(); chooser.title = "Save Multiplayer Game"
-            chooser.allowedFileTypes = ["emuxsave"]; chooser.nameFieldStringValue = "Multiplayer Game.emuxsave"
+            chooser.allowedFileTypes = ["emuxsave"]; chooser.nameFieldStringValue = source.lastPathComponent
             chooser.directoryURL = URL.oeApplicationSupportDirectory.appendingPathComponent("Multiplayer Sessions", isDirectory: true)
             guard chooser.runModal() == .OK, let destination = chooser.url else { return }
             try data.write(to: destination, options: .atomic)
@@ -954,17 +1112,36 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         }
     }
     @objc static func hostLibraryGame(_ game: OEDBGame) {
-        let controller = NetworkPlayController.shared
-        controller.show(0)
-        guard !controller.busy, controller.room == nil, controller.gameProcess == nil else {
-            controller.status.stringValue = "Leave your current room before hosting another game."
-            return
+        _ = shared.prepareLibraryGameForHosting(game)
+    }
+    static func browseMultiplayerSaves() {
+        shared.show(0)
+        shared.chooseMultiplayerSave()
+    }
+    @objc static func resumeLibraryGame(_ game: OEDBGame) {
+        guard shared.prepareLibraryGameForHosting(game) else { return }
+        shared.chooseMultiplayerSave()
+    }
+    @discardableResult
+    private func prepareLibraryGameForHosting(_ game: OEDBGame) -> Bool {
+        show(0)
+        guard !busy, room == nil, gameProcess == nil else {
+            status.stringValue = "Leave your current room before hosting another game."
+            return false
         }
-        guard let rom = game.defaultROM else { return }
-        controller.selectedROM = rom
-        controller.defaults.set(rom.objectID.uriRepresentation().absoluteString, forKey: controller.prefix + "romID")
-        controller.updateSelectedGame()
-        controller.status.stringValue = "Choose your host options, then Create Room."
+        guard let rom = game.defaultROM else {
+            status.stringValue = "This game has no available ROM. Locate its file in your library first."
+            return false
+        }
+        // A detail-page action must not carry another game's resume file into
+        // the new room. The normal Host form remains responsible for options.
+        if selectedROM?.objectID != rom.objectID { clearMultiplayerSave() }
+        selectedROM = rom
+        defaults.set(rom.objectID.uriRepresentation().absoluteString, forKey: prefix + "romID")
+        updateSelectedGame()
+        refreshControls()
+        status.stringValue = "Choose your host options, then Create Room. Your invite code appears after the room is created."
+        return true
     }
     private func updateSelectedGame() {
         let revision = UUID(); selectionRevision = revision
@@ -972,19 +1149,22 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         refreshArtwork()
         gameValidation.textColor = .systemOrange
         gameValidation.stringValue = "! Untested"
-        guard rom.game?.system?.systemIdentifier == "openemu.system.snes" else {
-            gameValidation.stringValue = "! Untested — this console’s netplay runtime is not available yet"
+        let system = rom.game?.system?.systemIdentifier ?? ""
+        guard ["openemu.system.snes", "openemu.system.nes", "openemu.system.sg", "openemu.system.gba"].contains(system) else {
+            gameValidation.stringValue = "! Experimental — this system needs a netplay core adapter"
             return
         }
-        guard let url = rom.url else { return }
+        guard let source = rom.url else { return }
+        let archiveIndex = rom.archiveFileIndex?.intValue
         Task { @MainActor [weak self] in
-            let sha = await Task.detached(priority: .utility) { try? FileManager.default.hashFile(at: url, hashFunction: .sha256) }.value
+            let prepared = try? await NetworkROMPreparation.shared.prepare(source: source, index: archiveIndex, retainedRoot: nil)
+            let sha = prepared?.sha256
             guard let self, self.selectionRevision == revision else { return }
             struct Catalog: Decodable { let games: [Entry] }
             struct Entry: Decodable { let rom_sha256: String; let runtime_profile: String; let status: String; let notes: String }
             let catalog = Bundle.main.url(forResource: "NetplayCompatibility", withExtension: "json")
                 .flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode(Catalog.self, from: $0) }
-            if let entry = catalog?.games.first(where: { $0.rom_sha256 == sha && $0.runtime_profile == "snes9x-1.63-general-v2-abi1" && $0.status == "tested" }) {
+            if system == "openemu.system.snes", let entry = catalog?.games.first(where: { $0.rom_sha256 == sha && $0.runtime_profile == "snes9x-1.63-general-v2-abi1" && $0.status == "tested" }) {
                 self.gameValidation.stringValue = "✓ Tested — " + entry.notes
                 self.gameValidation.textColor = .secondaryLabelColor
             } else {
@@ -1026,27 +1206,37 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             }
         } catch { status.stringValue = "Could not read your library: " + error.localizedDescription }
     }
+    @objc private func saveROMCachePreference() {
+        defaults.set(keepUncompressed.state == .on, forKey: prefix + "keepUncompressed")
+    }
+    private func preparedROM(_ rom: OEDBRom) async throws -> NetworkROMPreparation.Prepared {
+        guard let source = rom.url else { throw fail("The library ROM is missing.") }
+        let index = rom.archiveFileIndex?.intValue
+        let retained = keepUncompressed.state == .on
+            ? URL.oeApplicationSupportDirectory.appendingPathComponent("Netplay ROM Cache", isDirectory: true) : nil
+        if index != nil { status.stringValue = "Preparing compressed ROM for netplay…" }
+        return try await NetworkROMPreparation.shared.prepare(source: source, index: index, retainedRoot: retained)
+    }
     private func matchLibraryGame(expectedSHA: String, profile: String, allowTransfer: Bool = false) async throws -> Bool {
         guard let context = OELibraryDatabase.default?.mainThreadContext else { throw fail("Open your game library first.") }
         let request = NSFetchRequest<OEDBRom>(entityName: OEDBRom.entityName)
         let games = try context.fetch(request).filter {
-            !$0.isDeleted && $0.game != nil && $0.archiveFileIndex == nil && $0.url != nil
-                && (!profile.hasPrefix("snes9x-") || $0.game?.system?.systemIdentifier == "openemu.system.snes")
+            !$0.isDeleted && $0.game != nil && $0.url != nil
+                && ($0.game?.system?.systemIdentifier == (profile.hasPrefix("oe1.nes.") ? "openemu.system.nes" : profile.hasPrefix("oe1.sg.") ? "openemu.system.sg" : profile.hasPrefix("oe1.gbalink.") ? "openemu.system.gba" : "openemu.system.snes"))
         }
-        let urls = games.compactMap(\.url)
-        status.stringValue = "Finding the host’s game in your library by SHA-256…"
-        let match = await Task.detached(priority: .userInitiated) {
-            for (index, url) in urls.enumerated() {
-                if Task.isCancelled { return Optional<Int>.none }
-                if (try? FileManager.default.hashFile(at: url, hashFunction: .sha256)) == expectedSHA { return index }
+        status.stringValue = "Finding the host’s game in your library by extracted ROM SHA-256…"
+        var match: Int?
+        for (index, rom) in games.enumerated() {
+            try Task.checkCancellation()
+            if let prepared = try? await preparedROM(rom), prepared.sha256 == expectedSHA {
+                match = index; break
             }
-            return Optional<Int>.none
-        }.value
+        }
         var chosen: OEDBRom?
         if let match { chosen = games[match] }
         else {
             let alert = NSAlert(); alert.messageText = "Matching game not found in your library"
-            alert.informativeText = "No readable, uncompressed library game matches the host’s SHA-256:\n\(expectedSHA)\n\nChoose a library game to verify it, or cancel and import the matching game first. Different revisions will not connect."
+            alert.informativeText = "No readable library game matches the host’s SHA-256:\n\(expectedSHA)\n\nChoose a library game to verify it, or cancel and import the matching game first. Different revisions will not connect."
             alert.addButton(withTitle: "Choose Library Game…"); alert.addButton(withTitle: "Cancel")
             if allowTransfer { alert.addButton(withTitle: "Join Room to Download…") }
             let answer = alert.runModal()
@@ -1062,11 +1252,8 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                 browser.present(on: panel) { rom in continuation.resume(returning: rom) }
             }
             libraryBrowser = nil
-            guard let rom = chosen, let url = rom.url else { throw fail("Join cancelled.") }
-            guard rom.archiveFileIndex == nil else { throw fail("Import an uncompressed copy of this game before joining. Expected SHA-256: \(expectedSHA)") }
-            let actual = try await Task.detached(priority: .userInitiated) {
-                try FileManager.default.hashFile(at: url, hashFunction: .sha256)
-            }.value
+            guard let rom = chosen else { throw fail("Join cancelled.") }
+            let actual = try await preparedROM(rom).sha256
             guard actual == expectedSHA else {
                 let mismatch = NSAlert(); mismatch.messageText = "Game SHA-256 does not match"
                 mismatch.informativeText = "Host: \(expectedSHA)\nYour file: \(actual)\n\nThese are different game files. Choose the same revision as the host."
@@ -1083,14 +1270,33 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         status.stringValue = "Matching game selected; SHA-256 verified. Joining…"
         return true
     }
+    private func runtimeEnvironment(for selectedSystem: String?) throws -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        // Only trusted local metadata selects executable code; never use a remote plugin path.
+        for key in ["NX_NETPLAY_BACKEND", "NX_NETPLAY_CORE", "NX_NETPLAY_SYSTEM", "NX_NETPLAY_VIEW", "NX_NETPLAY_PLAYERS"] { environment.removeValue(forKey: key) }
+        let profile = (room?["compatibility"] as? [String: Any])?["profile"] as? String ?? ""
+        let system = selectedSystem ?? (profile.hasPrefix("oe1.nes.") ? "openemu.system.nes" : profile.hasPrefix("oe1.sg.") ? "openemu.system.sg" : profile.hasPrefix("oe1.gbalink.") ? "openemu.system.gba" : "openemu.system.snes")
+        if system == "openemu.system.snes" { environment["NX_NETPLAY_BACKEND"] = "snes9x"; environment["NX_NETPLAY_PLAYERS"] = String(selectedPlayerCount); return environment }
+        if system == "openemu.system.nes" || system == "openemu.system.sg" || system == "openemu.system.gba" {
+            let coreName = system == "openemu.system.nes" ? "Nestopia" : system == "openemu.system.sg" ? "GenesisPlus" : "mGBA"
+            let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/NetworkPlay/Cores/\(coreName).oecoreplugin")
+            let core = FileManager.default.fileExists(atPath: bundled.path) ? bundled : URL.oeApplicationSupportDirectory.appendingPathComponent("Cores/\(coreName).oecoreplugin")
+            guard let bundle = Bundle(url: core), bundle.bundleIdentifier == "org.openemu.\(coreName)",
+                  let executable = bundle.executableURL, FileManager.default.isExecutableFile(atPath: executable.path) else {
+                throw fail("Install the \(coreName) core in Settings → Cores to use experimental netplay.")
+            }
+            environment["NX_NETPLAY_BACKEND"] = "openemu"
+            environment["NX_NETPLAY_CORE"] = core.path
+            environment["NX_NETPLAY_SYSTEM"] = system
+            return environment
+        }
+        throw fail("Experimental netplay for this system still needs a compatible core adapter. Local play remains available.")
+    }
     private func identity(expectedSHA: String? = nil) async throws -> [String: Any] {
         guard let rom = selectedROM, !rom.isDeleted, rom.managedObjectContext != nil,
-              let gameURL = rom.url else { throw fail("Choose an imported game from your OpenEmu library first.") }
-        guard rom.archiveFileIndex == nil else { throw fail("This Network Play preview requires an uncompressed library game. Compressed library games are not supported yet.") }
-        guard FileManager.default.isReadableFile(atPath: gameURL.path) else { throw fail("The selected library game's file is missing. Relocate it in OpenEmu, then select it again.") }
-        guard rom.game?.system?.systemIdentifier == "openemu.system.snes" else {
-            throw fail("This console does not yet have a Network Play runtime. It remains available for local play. Untested SNES games can be hosted now.")
-        }
+              rom.url != nil else { throw fail("Choose an imported game from your OpenEmu library first.") }
+        let runtimeEnvironment = try runtimeEnvironment(for: rom.game?.system?.systemIdentifier)
+        let gameURL = try await preparedROM(rom).url
         let expected = expectedSHA?.lowercased()
         if let expected {
             // Report a different file as a SHA mismatch before the runtime's
@@ -1104,7 +1310,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         }
         let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/NetworkPlay/emu-identity")
         guard FileManager.default.isExecutableFile(atPath: helper.path) else { throw fail("This build is missing Network Play runtime support.") }
-        let process = Process(); let pipe = Pipe(); process.executableURL = helper; process.arguments = [gameURL.path]
+        let process = Process(); process.environment = runtimeEnvironment; let pipe = Pipe(); process.executableURL = helper; process.arguments = [gameURL.path]
         process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
         let data: Data = try await withCheckedThrowingContinuation { continuation in
             process.terminationHandler = { task in
@@ -1119,7 +1325,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                        actual != expected {
                         message = "Game SHA-256 mismatch. Host: \(expected). Your file: \(actual). Choose the same game revision as the host."
                     } else {
-                        message = "The network runtime could not load this game. Check that it is a valid, uncompressed SNES ROM."
+                        message = "The network runtime could not load this game. Check that it is a valid ROM for the selected system and that its core is installed."
                     }
                     continuation.resume(throwing: NSError(domain: "NetworkPlay", code: 2, userInfo: [NSLocalizedDescriptionKey: message]))
                 }
@@ -1139,10 +1345,13 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     }
     private func hostOptions(newRoom: Bool) throws -> [String: Any] {
         var result: [String: Any] = ["allow_downloads": shareROM.state == .on, "allow_spectators": spectators.state == .on, "spectator_limit": spectatorLimit.indexOfSelectedItem + 1]
-        if newRoom { result["game"] = selectedROM?.game?.displayName ?? "Network game" }
+        if newRoom { result["capacity"] = selectedPlayerCount; result["game"] = selectedROM?.game?.displayName ?? "Network game" }
         if newRoom || (room?["occupancy"] as? Int ?? 1) < 2 {
-            let roomName = title.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !roomName.isEmpty else { throw fail("Enter a room name before creating or updating the room.") }
+            let enteredName = title.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let gameName = selectedROM?.game?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let roomName = enteredName.isEmpty ? String((gameName.isEmpty ? "Game with friends" : gameName + " with friends").prefix(64)) : enteredName
+            title.stringValue = roomName
+            defaults.set(roomName, forKey: prefix + "roomName")
             result["title"] = roomName
             result["visibility"] = publicRoom.state == .on ? "public" : "unlisted"
             if protectedRoom.state == .off { result["password"] = "" }
@@ -1174,10 +1383,17 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
     }
     func controlTextDidChange(_ notification: Notification) {
         guard let field = notification.object as? NSTextField else { return }
-        if field === title || field === password { optionsChanged(); return }
+        if field === title {
+            defaults.set(field.stringValue, forKey: prefix + "roomName")
+            optionsChanged(); return
+        }
+        if field === password { optionsChanged(); return }
         if field === name || field === hostName {
             let value = field.stringValue
-            name.stringValue = value; hostName.stringValue = value
+            // Update only the other page's field; leave the active editor and
+            // any marked (input-method) text under AppKit's control.
+            let otherName = field === name ? hostName : name
+            if otherName.stringValue != value { otherName.stringValue = value }
             defaults.set(value, forKey: prefix + "displayName")
             refreshJoinIdentity(); refreshControls(); return
         }
@@ -1209,6 +1425,8 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
                   expected.range(of: "^[a-fA-F0-9]{64}$", options: .regularExpression) != nil else {
                 throw self.fail("The host did not provide a valid game SHA-256.")
             }
+            self.joiningPlayerCount = target["capacity"] as? Int ?? 2
+            defer { self.joiningPlayerCount = nil }
             let haveROM = try await self.matchLibraryGame(expectedSHA: expected.lowercased(), profile: compatibility["profile"] as? String ?? "", allowTransfer: role == 0 && target["allow_downloads"] as? Bool == true)
             var body = locator
             body["username"] = try self.displayName(); body["password"] = secret; body["role"] = role == 0 ? "player" : "spectator"
@@ -1244,7 +1462,9 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         defer { try? FileManager.default.removeItem(at: directory) }
         let title = room?["game"] as? String ?? "Network Game"
         let safeTitle = String(title.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || " -_".unicodeScalars.contains($0) }.prefix(100))
-        let destination = directory.appendingPathComponent((safeTitle.isEmpty ? "Network Game" : safeTitle) + ".sfc")
+        let profile = (room?["compatibility"] as? [String: Any])?["profile"] as? String ?? ""
+        let fileExtension = profile.hasPrefix("oe1.nes.") ? ".nes" : profile.hasPrefix("oe1.sg.") ? ".gen" : profile.hasPrefix("oe1.gbalink.") ? ".gba" : ".sfc"
+        let destination = directory.appendingPathComponent((safeTitle.isEmpty ? "Network Game" : safeTitle) + fileExtension)
         var importURL = destination
         if !UserDefaults.standard.bool(forKey: OECopyToLibraryKey) {
             // In-place libraries need a user-selected permanent source, just as
@@ -1268,6 +1488,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         if let servers = try selectedSTUN() { launch["stun_servers"] = servers }
         launch["relay_network"] = try await authorizeRelay(base, roomID: id)
         let process = Process(), input = Pipe(), output = Pipe()
+        process.environment = try runtimeEnvironment(for: selectedROM?.game?.system?.systemIdentifier)
         process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/NetworkPlay/NetworkPlay.app/Contents/MacOS/emu-live")
         process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
         transferProcess = process
@@ -1394,7 +1615,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             let minutes = max(0, Int(ceil(Double(remaining) / 60)))
             roomStatus.stringValue += "\nSession ends in \(minutes) minute\(minutes == 1 ? "" : "s"). Save and start a new room to continue."
         }
-        status.stringValue = gameMessage ?? (gameProcess == nil ? (role == "host" ? ((room["occupancy"] as? Int ?? 1) < 2 ? "You are hosting. Share your invite; waiting for another player." : "Players are in the room. Choose Start Game.") : (room["state"] as? String == "playing" ? "The host has started. Choose Connect to Game." : "You have joined the room. Waiting for the host to start the game.")) : "Network game window is open. Spectators are read-only.")
+        status.stringValue = gameMessage ?? (gameProcess == nil ? (role == "host" ? ((room["occupancy"] as? Int ?? 1) < selectedPlayerCount ? "You are hosting. Share your invite; waiting for all selected players." : "Players are in the room. Choose Start Game.") : (room["state"] as? String == "playing" ? "The host has started. Choose Connect to Game." : "You have joined the room. Waiting for the host to start the game.")) : "Network game window is open. Spectators are read-only.")
         refreshControls()
     }
     private func heartbeat() async {
@@ -1414,7 +1635,8 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         }
     }
     private func sendRequestedROM(base: URL, roomID: String) async throws {
-        guard let rom = selectedROM?.url else { throw fail("Choose the host’s game first.") }
+        guard let selectedROM else { throw fail("Choose the host’s game first.") }
+        let rom = try await preparedROM(selectedROM).url
         let progressDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: progressDirectory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: progressDirectory) }
@@ -1426,6 +1648,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
         config["relay_network"] = try await authorizeRelay(base, roomID: roomID)
         if base.scheme == "http", ["127.0.0.1", "localhost"].contains(base.host ?? "") { config["local_test_mode"] = true }
         let process = Process(), input = Pipe(), output = Pipe()
+        process.environment = try runtimeEnvironment(for: selectedROM.game?.system?.systemIdentifier)
         process.executableURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/NetworkPlay/NetworkPlay.app/Contents/MacOS/emu-live")
         process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
         transferProcess = process; cancelTransferButton.isHidden = false
@@ -1514,7 +1737,7 @@ final class NetworkPlayController: NSObject, NSMenuItemValidation, NSTextFieldDe
             switch key {
             case "game": text = "\(item["title"] as? String ?? "Game")\nHost: \(item["host_name"] as? String ?? "Player")"
             case "relay": text = item["relay_name"] as? String ?? "Relay"
-            case "players": text = "\(item["occupancy"] as? Int ?? 0)/2"
+            case "players": text = "\(item["occupancy"] as? Int ?? 0)/\(item["capacity"] as? Int ?? 2)"
             default: text = (item["requires_password"] as? Bool == true ? "Password" : "Open") + (item["allow_spectators"] as? Bool == true ? " · Watch" : "")
             }
         } else {
@@ -1722,7 +1945,7 @@ private final class NetworkPlayLibraryBrowser: NSObject, NSTableViewDataSource, 
     private let games = NSTableView()
     private let search = NSSearchField()
     private let count = NSTextField(labelWithString: "")
-    private let choose = NSButton(title: "Choose Game", target: nil, action: nil)
+    private let choose = NXDesignButton(title: "Choose Game", target: nil, action: nil)
     private let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 850, height: 560),
                                  styleMask: [.titled], backing: .buffered, defer: false)
     private var completion: ((OEDBRom?) -> Void)?
@@ -1757,7 +1980,7 @@ private final class NetworkPlayLibraryBrowser: NSObject, NSTableViewDataSource, 
         let note = NSTextField(wrappingLabelWithString: "Browse your imported games by system. Untested games are marked ! in Network Play. The exact file hash is checked before joining.")
         note.textColor = .secondaryLabelColor
         choose.target = self; choose.action = #selector(confirm); choose.bezelStyle = .rounded
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelSelection)); cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
+        let cancel = NXDesignButton(title: "Cancel", target: self, action: #selector(cancelSelection)); cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
         let actions = NSStackView(views: [cancel, choose]); actions.orientation = .horizontal
         let stack = NSStackView(views: [heading, search, columns, count, note, actions])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12; stack.translatesAutoresizingMaskIntoConstraints = false
@@ -1776,6 +1999,8 @@ private final class NetworkPlayLibraryBrowser: NSObject, NSTableViewDataSource, 
         rail.selectRowIndexes(IndexSet(integer: systemIndex), byExtendingSelection: false)
         reloadGames()
         if let initial, let index = visible.firstIndex(of: initial) { games.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false); games.scrollRowToVisible(index) }
+        choose.primary = true
+        NXDesign.apply(to: sheet)
         parent.beginSheet(sheet)
     }
     func numberOfRows(in tableView: NSTableView) -> Int { tableView === rail ? systems.count + 1 : visible.count }

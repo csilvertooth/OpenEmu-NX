@@ -81,9 +81,13 @@ final class SidebarController: NSViewController {
     var lastSidebarSelection: String
     
     var lastSidebarSelectionItem: SidebarItem? {
-        systems.first(where: { $0.sidebarID == lastSidebarSelection }) ?? collections.first(where: { $0.sidebarID == lastSidebarSelection})
+        systems.first(where: { $0.sidebarID == lastSidebarSelection }) ?? collections.first(where: { $0.sidebarID == lastSidebarSelection}) ?? destinations.first(where: { $0.sidebarID == lastSidebarSelection })
     }
-    
+
+    private let libraryGroup = SidebarGroupItem(name: "Library", autosaveName: .sidebarSubgroupItem, key: "nx.library")
+    private let multiplayerDestination = NXMultiplayerSidebarItem()
+    private let destinations = [SidebarDestinationItem(category: .saveStates), SidebarDestinationItem(category: .homebrew)]
+    private var lastGameSelectionID: String?
     private let consolesGroup = SidebarGroupItem(name: "Consoles", autosaveName: .sidebarConsolesItem)
     private let collectionsGroup = SidebarGroupItem(name: "Collections", autosaveName: .sidebarCollectionsItem)
     private let favoritesGroup = SidebarGroupItem(name: "Favorite Consoles", autosaveName: .sidebarFavoritesItem)
@@ -119,7 +123,11 @@ final class SidebarController: NSViewController {
         let favoriteSet = Set(favoriteIDs)
         let favorites = ordered(systems.filter { favoriteSet.contains(itemID($0)) }, key: "NXSidebarFavorites")
         let remaining = systems.filter { !favoriteSet.contains(itemID($0)) }
-        groupChildren = [favoritesGroup.key: favorites, collectionsGroup.key: ordered(collections, key: "NXSidebarCollections")]
+        let allGames = collections.filter { $0 is OEDBAllGamesCollection }
+        groupChildren = [libraryGroup.key: allGames + destinations.filter { $0.category != .homebrew } + [multiplayerDestination],
+                         favoritesGroup.key: favorites,
+                         collectionsGroup.key: ordered(collections.filter { !($0 is OEDBAllGamesCollection) }, key: "NXSidebarCollections")]
+
         if grouping == "flat" {
             groupChildren[consolesGroup.key] = ordered(remaining, key: "NXSidebarSystems")
         } else {
@@ -134,9 +142,10 @@ final class SidebarController: NSViewController {
             }
             groupChildren[consolesGroup.key] = ordered(sections, key: "NXSidebarGroups." + grouping)
         }
+        groupChildren[consolesGroup.key, default: []].append(contentsOf: destinations.filter { $0.category == .homebrew })
         let base = [favoritesGroup, consolesGroup, collectionsGroup]
         let order = sidebarDefaults.stringArray(forKey: "NXSidebarSections") ?? base.map(\.key)
-        groups = base.sorted { (order.firstIndex(of: $0.key) ?? 99) < (order.firstIndex(of: $1.key) ?? 99) }
+        groups = [libraryGroup] + base.sorted { (order.firstIndex(of: $0.key) ?? 99) < (order.firstIndex(of: $1.key) ?? 99) }
     }
     private func restoreExpansion() {
         restoringExpansion = true
@@ -157,7 +166,7 @@ final class SidebarController: NSViewController {
         if collapsed { ids.insert(group.key) } else { ids.remove(group.key) }
         sidebarDefaults.set(Array(ids), forKey: "NXSidebarCollapsed")
     }
-
+    
     var systems: [SidebarItem] = []
     var collections: [SidebarItem] = []
     
@@ -173,21 +182,29 @@ final class SidebarController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        // Native sidebar material follows the system appearance and accessibility settings.
-        sidebarView.style = .sourceList
-        sidebarView.backgroundColor = .clear
-        if let scroll = sidebarView.enclosingScrollView, let parent = scroll.superview {
-            scroll.drawsBackground = false
-            let material = NSVisualEffectView(frame: scroll.frame)
-            material.material = .sidebar; material.blendingMode = .behindWindow; material.state = .followsWindowActiveState
-            material.autoresizingMask = [.width, .height]
-            parent.addSubview(material, positioned: .below, relativeTo: scroll)
+        sidebarView.style = .plain
+        sidebarView.backgroundColor = NXDesign.sidebar
+        sidebarView.selectionHighlightStyle = .regular
+        if let scroll = sidebarView.enclosingScrollView {
+            scroll.removeFromSuperview()
+            scroll.drawsBackground = false; scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+            scroll.automaticallyAdjustsContentInsets = false
+            let root = NXDesignBackground(color: NXDesign.sidebar)
+            view = root
+            let brand = NSTextField(labelWithString: "OpenEmu-NX"); brand.font = .systemFont(ofSize: 21, weight: .bold); brand.textColor = NXDesign.accent
+            let tagline = NSTextField(labelWithString: "Your games. Together."); tagline.font = .systemFont(ofSize: 12); tagline.textColor = NXDesign.secondary
+            let branding = NSStackView(views: [brand, tagline]); branding.orientation = .vertical; branding.alignment = .leading; branding.spacing = 6
+            let settings = NXDesignButton(title: "Settings", target: NSApp.delegate, action: #selector(AppDelegate.showPreferencesWindow(_:)))
+            settings.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: nil)
+            let note = NSTextField(labelWithString: "Library stays on this Mac"); note.textColor = NXDesign.secondary; note.font = .systemFont(ofSize: 11)
+            for child in [branding, scroll, settings, note] { child.translatesAutoresizingMaskIntoConstraints = false; root.addSubview(child) }
+            NSLayoutConstraint.activate([branding.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28), branding.topAnchor.constraint(equalTo: root.topAnchor, constant: 28), branding.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -20), scroll.topAnchor.constraint(equalTo: branding.bottomAnchor, constant: 18), scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12), scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12), scroll.bottomAnchor.constraint(equalTo: settings.topAnchor, constant: -12), settings.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), settings.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24), settings.heightAnchor.constraint(equalToConstant: 38), settings.bottomAnchor.constraint(equalTo: note.topAnchor, constant: -24), note.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24), note.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16)])
         }
         sidebarView.registerForDraggedTypes([.fileURL, .game, Self.reorderType])
         sidebarView.setDraggingSourceOperationMask(.move, forLocal: true)
         sidebarView.indentationPerLevel = 12
         restoreExpansion()
-
+        
         let menu = NSMenu()
         menu.delegate = self
         sidebarView.menu = menu
@@ -282,6 +299,18 @@ final class SidebarController: NSViewController {
     
     // MARK: - Actions
     
+    func selectCategory(_ category: LibraryController.Category) {
+        if category == .games {
+            if selectedSidebarItem is GameCollectionViewItemProtocol { return }
+            let previous = (systems + collections).first { $0.sidebarID == lastGameSelectionID }
+            if let item = previous ?? collections.first(where: { $0 is OEDBAllGamesCollection }) {
+                selectItem(item)
+            }
+        } else if let item = destinations.first(where: { $0.category == category }) {
+            selectItem(item)
+        }
+    }
+
     func selectItem(_ item: SidebarItem) {
         if sidebarView.row(forItem: item) < 0 {
             for group in groups {
@@ -297,7 +326,7 @@ final class SidebarController: NSViewController {
         }
         let index = sidebarView.row(forItem: item)
         guard index > -1 else { return }
-
+        
         if sidebarView.selectedRow != index {
             sidebarView.selectRowIndexes([index], byExtendingSelection: false)
         }
@@ -469,9 +498,12 @@ final class SidebarController: NSViewController {
 // MARK: - Delegate
 
 extension SidebarController: NSOutlineViewDelegate {
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? { NXDesignSidebarRow() }
+
     func outlineViewSelectionDidChange(_ notification: Notification) {
         if let id = selectedSidebarItem?.sidebarID {
             lastSidebarSelection = id
+            if selectedSidebarItem is GameCollectionViewItemProtocol { lastGameSelectionID = id }
         }
         NotificationCenter.default.post(name: .OESidebarSelectionDidChange, object: self, userInfo: nil)
     }
@@ -493,13 +525,13 @@ extension SidebarController: NSOutlineViewDataSource {
         if let group = item as? SidebarGroupItem { return groupChildren[group.key]![index] }
         return groups[index]
     }
-
+    
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool { item is SidebarGroupItem }
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
         guard let group = item as? SidebarGroupItem else { return item == nil ? groups.count : 0 }
         return groupChildren[group.key]?.count ?? 0
     }
-
+    
     func outlineView(_ outlineView: NSOutlineView, objectValueFor tableColumn: NSTableColumn?, byItem item: Any?) -> Any? {
         (item as? SidebarItem)?.sidebarName
     }
@@ -513,7 +545,7 @@ extension SidebarController: NSOutlineViewDataSource {
             view = outlineView.makeView(withIdentifier: .headerView, owner: self) as? NSTableCellView
             
             if let button = (view as? SidebarHeaderView)?.button {
-                
+                button.isHidden = false
                 switch group.autosaveName {
                 case .sidebarConsolesItem:
                     button.title = ""
@@ -532,23 +564,32 @@ extension SidebarController: NSOutlineViewDataSource {
             
         } else {
             view = outlineView.makeView(withIdentifier: .itemView, owner: self) as? NSTableCellView
-            view?.imageView?.image = item.sidebarIcon
+            view?.imageView?.image = NSImage(systemSymbolName: item is OEDBSystem ? "gamecontroller" : (item.sidebarName == "Homebrew" ? "leaf" : (item.sidebarName == "Save States" ? "externaldrive" : (item is NXMultiplayerSidebarItem ? "person.2" : "books.vertical"))), accessibilityDescription: nil)
+            if item is OEDBSystem {
+                view?.imageView?.image = item.sidebarIcon
+                view?.imageView?.contentTintColor = nil
+            } else {
+                view?.imageView?.contentTintColor = NXDesign.foreground
+            }
             view?.textField?.isSelectable = false
             view?.textField?.isEditable = item.isEditableInSidebar
         }
         
-        view?.textField?.stringValue = item.sidebarName
+        view?.textField?.stringValue = item === libraryGroup ? "" : item.sidebarName
+        view?.textField?.font = .systemFont(ofSize: item is SidebarGroupItem ? 12 : 14, weight: item is SidebarGroupItem ? .semibold : .regular)
+        view?.textField?.textColor = item is SidebarGroupItem ? NXDesign.secondary : NXDesign.foreground
         view?.toolTip = item is SidebarGroupItem ? "Expand or collapse this section. Drag to reorder." : "Right-click for options. Drag to reorder."
         
         return view
     }
     
     func outlineView(_ outlineView: NSOutlineView, shouldShowOutlineCellForItem item: Any) -> Bool {
-        item is SidebarGroupItem
+        item is SidebarGroupItem && item as AnyObject !== libraryGroup
     }
-
+    
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
-        return item is SidebarGroupItem ? 30 : 28
+        if item as AnyObject === libraryGroup { return 1 }
+        return item is SidebarGroupItem ? 28 : 30
     }
     
     func outlineView(_ outlineView: NSOutlineView, isGroupItem item: Any) -> Bool {
@@ -568,7 +609,7 @@ extension SidebarController: NSOutlineViewDataSource {
             return acceptSidebarMove(info, parent: item as? SidebarGroupItem, index: index)
         }
         guard let database else { return false }
-
+        
         let pboard = info.draggingPasteboard
         
         var collection: OEDBCollection?
@@ -834,7 +875,7 @@ extension SidebarController {
         reloadDataAndPreserveSelection(); selectItem(system)
     }
     func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
-        guard let item = item as? SidebarItem else { return nil }
+        guard let item = item as? SidebarItem, !(item is SidebarDestinationItem), !(item is OEDBAllGamesCollection), item !== libraryGroup else { return nil }
         let parent = (outlineView.parent(forItem: item) as? SidebarGroupItem)?.key ?? "root"
         let payload = ["id": itemID(item), "parent": parent]
         guard let data = try? JSONSerialization.data(withJSONObject: payload), let json = String(data: data, encoding: .utf8) else { return nil }
@@ -850,8 +891,9 @@ extension SidebarController {
         return (item, parent)
     }
     private func canMoveSidebar(_ info: NSDraggingInfo, parent: SidebarGroupItem?, index: Int) -> Bool {
-        guard let (item, oldParent) = sidebarMove(info) else { return false }
+        guard parent !== libraryGroup, let (item, oldParent) = sidebarMove(info) else { return false }
         if let group = item as? SidebarGroupItem {
+            guard group !== libraryGroup else { return false }
             return index >= 0 && (groups.contains(group) ? parent == nil : parent === consolesGroup)
         }
         if item is OEDBSystem {
@@ -901,7 +943,7 @@ class SidebarGroupItem: NSObject, SidebarItem {
     let name: String
     let autosaveName: AutosaveName
     let key: String
-
+    
     init(name: String, autosaveName: AutosaveName, key: String? = nil) {
         self.name = name
         self.autosaveName = autosaveName
@@ -919,3 +961,19 @@ extension Key {
     static let lastSidebarSelection: Key = "lastSidebarSelection"
 }
 
+
+final class NXDesignSidebarRow: NSTableRowView {
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+    override func drawSelection(in dirtyRect: NSRect) {
+        NSColor(srgbRed: 0.27, green: 0.21, blue: 0.33, alpha: 1).setFill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 1), xRadius: 10, yRadius: 10).fill()
+    }
+}
+
+final class NXMultiplayerSidebarItem: NSObject, SidebarItem {
+    let sidebarName = "Multiplayer Saves"
+    let sidebarID: String? = "nx.multiplayerSaves"
+    let sidebarIcon = NSImage(systemSymbolName: "person.2", accessibilityDescription: nil)
+    let isEditableInSidebar = false
+    let hasSubCollections = false
+}

@@ -1026,7 +1026,7 @@ static NSString * const OEGameTableSortDescriptorsKey = @"OEGameTableSortDescrip
 {
     if(self.selectedGames.count == 1)
     {
-        [NSApp sendAction:@selector(startSelectedGame:) to:nil from:self];
+        [NSApp sendAction:NSSelectorFromString(@"showSelectedGameDetails:") to:nil from:self];
     }
 }
 
@@ -1299,7 +1299,7 @@ static NSString * const OEGameTableSortDescriptorsKey = @"OEGameTableSortDescrip
     id game = [self tableView:sender objectValueForTableColumn:nil row:row];
     if(!game) return;
 
-    [NSApp sendAction:@selector(startGame:) to:nil from:game];
+    [NSApp sendAction:NSSelectorFromString(@"showSelectedGameDetails:") to:nil from:game];
 }
 
 @end

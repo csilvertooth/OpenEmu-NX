@@ -1,0 +1,46 @@
+# Native core netplay adapter
+
+This is an additional backend for the existing netplay ABI. SNES continues to use the dedicated Snes9x backend. Native plugin adapters cover NES/Nestopia, Genesis/Genesis Plus GX, and experimental two-handheld GBA/mGBA link. It is experimental; this does not enable every OpenEmu system.
+
+The frontend selects a locally installed core, never a plugin path supplied by a peer. Compatibility includes the extracted ROM SHA-256, adapter binary SHA-256, core binary SHA-256 (in the profile), and initial state SHA-256. Players must match all of them. Archives are prepared before readiness. Each helper uses private temporary support/BIOS directories, starts from factory battery state, and does not read or overwrite the local-play saves.
+
+Saved local player-one bindings are mapped to the negotiated network slot. Remote controller layouts are not transferred. NES uses the system's eight button indices; Genesis and SNES use their respective twelve-button indices. The adapter converts bitmap video to RGB565 and synchronously resamples PCM to the existing 32040 Hz stereo presentation path. Resampler history is part of each rollback snapshot.
+
+## Focused check
+
+Run `Scripts/netplay/test-native-core.py --runtime PATH/libemu_openemu.dylib --core PATH/Nestopia.oecoreplugin --rom PATH/game.nes`. Use an extracted, legally available ROM. Run in two fresh processes and compare the JSON hashes. The check applies both players' inputs, restores a checkpoint, and requires identical video, PCM audio, and final state after replay. ROMs and BIOS files are not test fixtures in this repository.
+
+## Current evidence and remaining work
+
+- NES/Nestopia: Contra, 180-frame checkpoint replay with both players' inputs, identical video/audio/state. Two local helper peers completed 600 frames with identical final state hashes, including a run with 40 ms simulated send latency and 1% packet loss. The host replayed 122 frames and guest replayed 184; average core work was 1.6–1.8 ms per frame. A separate two-Mac headless run completed 600 frames at approximately 60 fps with 20 ms simulated one-way delay and 1% loss, matching final state hashes. Physical controller/listening and signed distribution checks remain.
+- SNES/Snes9x: original backend retained.
+- Genesis Plus GX: Contra Hard Corps and Golden Axe pass 180-frame exact video/audio/state replay with player input. A 1,200-frame warmup plus 180-frame input replay also passes state/audio checks. Private snapshots omit Z80/FM process addresses (rebuilt on restore) and include FM/filter/blip history. Two local Contra helper peers completed 600 frames at 59.9 fps with 40 ms simulated one-way delay and 1% loss, identical final state hashes, and 121/184 replayed frames. Average core work was 2.9/3.4 ms, maximum 4.9 ms. A separate two-Mac headless run completed 600 frames at 59.9 fps with 20 ms simulated one-way delay and 1% loss, matching final states (119/79 replayed frames). Physical controller/listening checks remain. The fixed plugin must be packaged before distributing the adapter; old installed Genesis plugins lack its snapshot API.
+- PicoDrive alternative: replay audio agrees in the short probe; state differs in the FM envelope counters. Do not mask those differences or advertise rollback compatibility.
+- GBA/mGBA: Mario Kart: Super Circuit passes 1,200-frame input warmup plus 180-frame exact state/audio replay, with matching final hashes across fresh processes. Private snapshots preserve resampler history and PSG channel caches; sound register restoration precedes channel timing restoration. The development adapter now runs two separate GBA machines with a shared serial cable. Four multiplayer baud modes pass word-exchange and in-flight snapshot tests. Mario Kart reaches a live linked race as P1/P2. After 6,600 scripted frames, an additional 180-frame rollback replay matches both screens, audio, and state exactly. Separate inputs move the two karts; both race clocks advance together.
+- Jaguar/VirtualJaguar: probe could not produce a state snapshot.
+- Lynx and PlayStation/Mednafen: isolated load did not succeed; BIOS/media setup still needs implementation. Disc systems need a validated multi-file media identity and safe BIOS configuration.
+- GPU-rendered systems, analog controls, controllers exceeding twelve digital buttons, other link-cable systems, and more than two active players need additional runtime/protocol work.
+
+Unverified games stay experimental. Missing backend capabilities must produce an explicit unavailable explanation, not silently run a different system's core. The native profile validation change in the private lobby must be deployed before NES/Genesis can use the hosted lobby; local validation does not alter production.
+
+## Genesis and GBA restoration regression
+
+`Scripts/netplay/test-core-restoration.mm` takes `CORE_BUNDLE SYSTEM_ID EXTRACTED_ROM SCRATCH_DIRECTORY`. Compile with Cocoa and OpenEmuBase against the built framework; set its runtime framework search path to the matching framework directory. Use a new scratch directory, never a user save folder. It performs 1,200 frames of input, captures a checkpoint, and checks 180 replay frames of audio and final state. A mismatch exits nonzero. Run twice to compare independent-process hashes. GBA uses one emulated controller; this probe does not test a link cable.
+
+For the Genesis network ABI, add `--system sg` to `test-native-core.py`. Both ordinary core disk-save formats remain unchanged. The extra snapshot formats are private to a matched core binary and must not be accepted as untrusted remote save data.
+
+## GBA link development (not distributed)
+
+Each netplay peer simulates both handhelds. Player inputs drive separate local GBA instances; the host presents handheld 1 and the guest presents handheld 2. Each screen has its own audio stream. The cable scheduler and both audio histories are restored together, so changing the presentation view does not change the shared state hash. Controller mappings remain local to each player. The initial scope is two players using the same game; single-pak download play, mixed cartridges, wireless adapters, and four-player cable sessions are not validated.
+
+`Scripts/netplay/test-gba-link.mm CORE_BUNDLE ROM SCRATCH` checks both serial words at all four multiplayer baud settings, restoring during an in-flight transfer, and 180 frames of exact video/audio/state replay. Compile as Objective-C++ with ARC, Cocoa, OpenEmuBase, `-DMINIMAL_CORE=1`, and the vendored mGBA include directory. Use a matching built framework and a fresh scratch directory. `probe-gba-link-gameplay.mm` accepts a fifth argument naming an input trace (`frame player button duration`, player 2 means both handhelds). Use `gba-super-circuit-inputs.txt` with `NX_PROBE_FRAMES=6600 NX_PROBE_REPLAY=1` to reach the race and check 180 replay frames. It writes both screens for visual verification; it does not assert game-specific memory values or completion of all three laps. No commercial ROM is included.
+
+`test-native-core.py --system gba --view 0` and `--view 1` produce identical final shared state hashes with different local video/audio hashes. NES and Genesis adapter replay regressions also pass. Local paired simulation measured roughly 1,800 paired frames/second in the serial probe; this excludes network, rendering, and listening validation. The patched mGBA plugin must be packaged before distribution; an old plugin is rejected explicitly. Physical controller/listening validation remains pending. No production lobby change or installation was performed for this phase.
+
+## Late-input link restoration
+
+The private linked snapshot preserves serial data registers including `SIOMLT_SEND`, which the vendored disk-state register whitelist omits. It also preserves cached SIO state and the scheduler boundary. Core loading temporarily detaches both cable drivers so restoring one handheld cannot interrupt the other. Driver attachment avoids loading a serial event while the GBA is still in GPIO mode.
+
+`Scripts/netplay/test-native-rollback.py --runtime PATH/libemu_openemu.dylib --core PATH/mGBA.oecoreplugin --rom PATH/game.gba --system gba --view 1 --trace PATH/expanded-inputs.txt` compares a fully known input run with late remote input prediction/correction. The trace contains contiguous `frame p1_mask p2_mask` rows from zero. A mismatch exits nonzero. Mario Kart: Super Circuit passed 7,800 frames with three-frame-late host input, covering linked menus and race gameplay. This caught a stale outgoing serial word after releasing A that ordinary checkpoint replay had missed.
+
+Two physical Macs subsequently passed 7,800 linked frames over direct LAN with 20 ms simulated one-way delay and 1% packet loss. Both confirmed frame 7,800 and final state `aa6662b864dc2622bf9840f4903633acd9aaebd7a6d072aa545e0f42cf4b5593`; each displayed its own handheld stream. Simulation averaged 59.72 fps, with 99/60 replayed frames and maximum rollback depths 4/5. The headless test does not establish audible smoothness or physical controller feel. The final local race probe again passed 180-frame exact video/audio/state replay, and the four-speed serial transfer probe passed. These development helpers remain separate from the installed apps.

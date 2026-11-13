@@ -342,3 +342,18 @@ void blip_add_delta_fast( blip_t* m, unsigned time, int delta )
 	out [7] += delta * delta_unit - delta2;
 	out [8] += delta2;
 }
+
+/* Copyright (c) 2026 Chris Silvertooth. Rollback snapshot extension. */
+int blip_snapshot_size(const blip_t *m) { return m ? 32+(m->size+buf_extra)*sizeof(buf_t)*1 : 0; }
+int blip_snapshot_save(const blip_t *m, void *out, int size) {
+ if(!m || !out || size!=blip_snapshot_size(m)) return 0;
+ unsigned char *p=out;int n=(m->size+buf_extra)*sizeof(buf_t);memset(p,0,32);
+ memcpy(p,&m->factor,sizeof(m->factor));memcpy(p+8,&m->offset,sizeof(m->offset));memcpy(p+16,&m->size,4);
+ memcpy(p+20,&m->integrator,4);memcpy(p+24,&m->avail,4);memcpy(p+32,SAMPLES(m),n);return 1;
+}
+int blip_snapshot_load(blip_t *m, const void *in, int size) {
+ if(!m || !in || size!=blip_snapshot_size(m)) return 0;
+ const unsigned char *p=in;int n=(m->size+buf_extra)*sizeof(buf_t);
+ if(memcmp(p,&m->factor,sizeof(m->factor)) || memcmp(p+16,&m->size,4))return 0;
+ memcpy(&m->offset,p+8,sizeof(m->offset));memcpy(&m->integrator,p+20,4);memcpy(&m->avail,p+24,4);memcpy(SAMPLES(m),p+32,n);return 1;
+}

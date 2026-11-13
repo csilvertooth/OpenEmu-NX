@@ -7,8 +7,8 @@
 #   from an old DerivedData hash whenever Xcode rotates the hash (workspace path
 #   change, scheme change, system cleanup). The user only finds out when the UI
 #   looks wrong. This script picks the newest OpenEmu.app across all known build
-#   locations, refuses to launch if source is newer than the binary, and force-
-#   replaces any running instance.
+#   locations and refuses to launch if source is newer than the binary or an
+#   app/game helper is already running. It never closes a running game.
 #
 # Usage:
 #   ./Scripts/launch-debug.sh            # newest Debug build
@@ -116,6 +116,26 @@ if [[ $FORCE -eq 0 ]]; then
     fi
 fi
 
+# Do not interrupt a game or create a second copy. Check before signing too:
+# re-signing a bundle in use can disrupt the running app and its helpers.
+# A process-inspection failure is not proof that it is safe to launch.
+assert_no_running_game() {
+    local process result
+    for process in OpenEmu OpenEmuHelperApp emu-live; do
+        pgrep -x "$process" >/dev/null 2>&1
+        result=$?
+        if [[ $result -eq 0 ]]; then
+            echo "launch-debug: $process is already running; leaving it untouched." >&2
+            echo "  Save and quit it yourself when ready, then run this command once." >&2
+            return 1
+        elif [[ $result -ne 1 ]]; then
+            echo "launch-debug: cannot verify running apps; refusing to launch." >&2
+            return 1
+        fi
+    done
+}
+assert_no_running_game || exit 1
+
 # Sign debug builds with a stable local certificate so macOS keeps the Input Monitoring grant across rebuilds.
 # Ad-hoc signatures change on every build, which silently revokes it. Create a code-signing certificate named
 # "OpenEmu Debug" in Keychain Access (or set OE_DEBUG_SIGN_IDENTITY); without one the build is launched as is.
@@ -133,17 +153,13 @@ if [[ "$CONFIG" == "Debug" ]]; then
     fi
 fi
 
-echo "launch-debug: launching $NEWEST"
+# Recheck after signing, in case the user opened a game in the meantime.
+assert_no_running_game || exit 1
+VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$NEWEST/Contents/Info.plist" 2>/dev/null || printf 'unknown')
+BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$NEWEST/Contents/Info.plist" 2>/dev/null || printf 'unknown')
+echo "launch-debug: opening $VERSION (build $BUILD)"
+echo "  $NEWEST"
 
-# 3. Kill any running OpenEmu (debug + production share a bundle ID).
-if pgrep -x OpenEmu >/dev/null; then
-    echo "launch-debug: killing running OpenEmu instance(s)..."
-    pkill -x OpenEmu || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-        pgrep -x OpenEmu >/dev/null || break
-        sleep 0.2
-    done
-fi
-
-# 4. Force a new instance bound to this bundle.
-open -n "$NEWEST"
+# A single Launch Services request. Do not force another instance with -n,
+# retry in a loop, or submit this command to a restarting service.
+open "$NEWEST"

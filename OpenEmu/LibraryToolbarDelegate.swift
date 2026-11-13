@@ -43,20 +43,17 @@ final class LibraryToolbarDelegate: NSObject, NSToolbarDelegate {
                 .oeAdd,
                 .oeViewMode,
                 .oeGridSize,
-                .oeSearch,
-                .oeCategory]
+                .oeSearch]
     }
     
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         if #available(macOS 11.0, *) {
             return [.oeViewMode,
-                    .oeCategory,
                     .flexibleSpace,
                     .oeSearch]
         } else {
             return [.oeViewMode,
                     .oeGridSize,
-                    .oeCategory,
                     .flexibleSpace,
                     .oeSearch]
         }
