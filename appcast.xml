@@ -7,6 +7,16 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <description>Signed OpenEmu-NX beta releases.</description>
     <language>en</language>
     <item>
+      <title>OpenEmu-NX 0.1.8-beta.3</title>
+      <link>https://github.com/csilvertooth/OpenEmu-NX/releases/tag/v0.1.8-beta.3</link>
+      <sparkle:version>60</sparkle:version>
+      <sparkle:shortVersionString>0.1.8-beta.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <pubDate>Fri, 13 Nov 2026 21:38:52 +0000</pubDate>
+      <description>New artwork-focused library, themed settings, multiplayer save browsing and Trash deletion, compressed-ROM matching, and experimental multi-core netplay.</description>
+      <enclosure url="https://github.com/csilvertooth/OpenEmu-NX/releases/download/v0.1.8-beta.3/OpenEmu-NX-0.1.8-beta.3.dmg" length="65989457" type="application/octet-stream" sparkle:edSignature="8ZSzyGOeV9KH36JwYIxlpPH8nos2WppDqBt68tEn8gt2WV6qO/Ckfjmxa4hzX+NlTI4xDbJyjddM1MpB+6pkCg=="></enclosure>
+    </item>
+    <item>
       <title>OpenEmu-NX 0.1.7-beta.5</title>
       <link>https://github.com/csilvertooth/OpenEmu-NX/releases/tag/v0.1.7-beta.5</link>
       <sparkle:version>52</sparkle:version>
@@ -78,6 +88,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: ljJECfp7NuPzy/LiXLGqskRE0SuzYgJdCTXNJL7airMVIT6JvolGiVLqyk87A0I1YfF5mPwMge8wEq5u6BYSDA==
-length: 6590
+edSignature: oeUJlcvIYD7xrQceE4aRRVF5aK3m4pp/S68JDe5WtmFW1/kg/l8txbySR1npuXP1YKE0fzziFGZxvkAs5k5cCw==
+length: 7483
 -->
